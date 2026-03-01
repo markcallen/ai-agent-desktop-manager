@@ -1,0 +1,15 @@
+[Unit]
+Description=VNC Desktop :%i
+After=network.target
+
+[Service]
+Type=forking
+User=%i
+# Replace User=%i with a real user if you don't run one user per display.
+# For single-user hosts, you can set User=youruser and pass DISPLAY id via %i.
+ExecStart=/usr/bin/vncserver :%i
+ExecStop=/usr/bin/vncserver -kill :%i
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+# Allowlist for ai-agent-desktop-manager service user (aadm)
+# Install to: /etc/sudoers.d/aadm (chmod 440)
+#
+# NOTE: adjust paths if your distro differs.
+
+aadm ALL=NOPASSWD: /usr/sbin/nginx -t
+aadm ALL=NOPASSWD: /bin/systemctl reload nginx
+
+# Allow starting/stopping ONLY these template units.
+# If your unit names differ, update this file and the .env.
+aadm ALL=NOPASSWD: /bin/systemctl start vnc@*
+aadm ALL=NOPASSWD: /bin/systemctl stop vnc@*
+aadm ALL=NOPASSWD: /bin/systemctl start websockify@*
+aadm ALL=NOPASSWD: /bin/systemctl stop websockify@*
+aadm ALL=NOPASSWD: /bin/systemctl start chrome@*
+aadm ALL=NOPASSWD: /bin/systemctl stop chrome@*
+aadm ALL=NOPASSWD: /bin/systemctl start aab@*
+aadm ALL=NOPASSWD: /bin/systemctl stop aab@*

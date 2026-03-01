@@ -1,0 +1,13 @@
+[Unit]
+Description=Chrome (CDP) on desktop :%i
+After=network.target
+
+[Service]
+Type=simple
+# This placeholder assumes a single user and uses DISPLAY=:%i.
+# CDP port: 9221+%i. Profile: ~/.chrome-agent-%i
+ExecStart=/usr/bin/bash -lc 'export DISPLAY=:%i; CDP=$((9221+%i)); PROF="$HOME/.chrome-agent-%i"; exec google-chrome --remote-debugging-address=127.0.0.1 --remote-debugging-port=$CDP --user-data-dir="$PROF" --no-first-run --disable-features=TranslateUI'
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

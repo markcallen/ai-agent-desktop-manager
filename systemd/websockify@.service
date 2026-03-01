@@ -1,0 +1,13 @@
+[Unit]
+Description=websockify for desktop :%i
+After=network.target
+
+[Service]
+Type=simple
+# websockify args: <listenPort> <targetHost:targetPort>
+# This placeholder assumes: listen 6080+%i -> localhost:5900+%i
+ExecStart=/usr/bin/bash -lc 'PORT=$((6080+%i)); TARGET=$((5900+%i)); exec websockify --web /usr/share/novnc $PORT 127.0.0.1:$TARGET'
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

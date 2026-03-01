@@ -1,0 +1,13 @@
+[Unit]
+Description=ai-agent-browser for desktop :%i
+After=network.target
+
+[Service]
+Type=simple
+# Placeholder. Replace with your ai-agent-browser binary/service invocation.
+# AAB port: 8764+%i. CDP port: 9221+%i
+ExecStart=/usr/bin/bash -lc 'AAB_PORT=$((8764+%i)); CDP_PORT=$((9221+%i)); exec /usr/local/bin/ai-agent-browser --host 127.0.0.1 --port $AAB_PORT --cdp-host 127.0.0.1 --cdp-port $CDP_PORT'
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=ai-agent-desktop-manager
+After=network.target
+
+[Service]
+Type=simple
+User=aadm
+Group=aadm
+WorkingDirectory=/opt/ai-agent-desktop-manager
+EnvironmentFile=/opt/ai-agent-desktop-manager/.env
+ExecStart=/usr/bin/node /opt/ai-agent-desktop-manager/dist/server.js
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

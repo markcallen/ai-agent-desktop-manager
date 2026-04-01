@@ -4,9 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-# websockify args: <listenPort> <targetHost:targetPort>
-# This placeholder assumes: listen 6080+%i -> localhost:5900+%i
-ExecStart=/usr/bin/bash -lc 'PORT=$((6080+%i)); TARGET=$((5900+%i)); exec websockify --web /usr/share/novnc $PORT 127.0.0.1:$TARGET'
+User=aadm
+Group=aadm
+EnvironmentFile=-/opt/ai-agent-desktop-manager/.env
+ExecStart=/usr/bin/bash -lc 'DISPLAY_MIN=${AADM_DISPLAY_MIN:-1}; WS_BASE=${AADM_WEBSOCKIFY_PORT_MIN:-6081}; WS_PORT=$((WS_BASE + %i - DISPLAY_MIN)); TARGET=$((5900 + %i)); exec websockify --web /usr/share/novnc "$WS_PORT" 127.0.0.1:"$TARGET"'
 Restart=on-failure
 
 [Install]

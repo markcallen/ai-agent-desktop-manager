@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
-    "cli": "tsx src/cli/aadm.ts"
+    "start": "node dist/index.js",
+    "cli": "tsx src/cli/aadm.ts",
+    "aab-console": "tsx src/cli/aab-console.ts",
+    "test": "node --import tsx --test test/**/*.test.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

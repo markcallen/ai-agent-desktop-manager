@@ -1,5 +1,14 @@
 # PLAN — MVP Delivery (v0.1)
 
+## Execution status
+- [x] Phase 1: Runtime Contract Alignment
+- [x] Phase 2: Lifecycle Safety and Rollback
+- [x] Phase 3: Doctor Endpoint Completion
+- [x] Phase 4: Host Integration Assets (repo side)
+- [x] Phase 5: Configuration and Validation
+- [x] Phase 6: Tests
+- [ ] Phase 7: MVP Acceptance on real target host (requires host with full runtime stack)
+
 ## Objective
 Deliver the v0.1 MVP defined in `PRD.md`:
 - JSON state registry

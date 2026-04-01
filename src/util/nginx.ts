@@ -10,13 +10,20 @@ export function snippetFilename(desktopId: string) {
 export function buildSnippet(display: number, wsPort: number) {
   const prefix = config.novncPathPrefix.replace(/\/$/, "");
   const loc = `${prefix}/${display}/`;
+  const query = `path=${prefix.replace(/^\//, "")}/${display}/websockify&resize=remote&autoconnect=1`;
+  // Redirect the bare desktop path to noVNC's HTML entrypoint.
   // Trailing slash in proxy_pass avoids path issues with noVNC assets.
-  return `location ${loc} {
+  return `location = ${loc} {
+  return 302 ${loc}vnc.html?${query};
+}
+
+location ${loc} {
   proxy_pass http://127.0.0.1:${wsPort}/;
   proxy_http_version 1.1;
   proxy_set_header Upgrade $http_upgrade;
   proxy_set_header Connection "upgrade";
-  proxy_read_timeout 3600;
+  proxy_read_timeout 7d;
+  proxy_send_timeout 7d;
 }
 `;
 }

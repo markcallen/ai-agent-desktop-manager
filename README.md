@@ -54,6 +54,7 @@ Default:
 - manager: `127.0.0.1:8899`
 - nginx snippet dir: `/etc/nginx/conf.d/agent-desktops`
 - route template: `/desktop/{display}/`
+- state dir: `./data`
 
 ---
 
@@ -118,24 +119,56 @@ sudo chmod 440 /etc/sudoers.d/aadm
 This allows:
 - `nginx -t`
 - `systemctl reload nginx`
-- starting/stopping **specific** template services (see file)
+- starting/stopping/checking status of **specific** template services (see file)
+
+---
+
+## Deployment runbook (systemd)
+
+1) Build the project:
+```bash
+npm install
+npm run build
+```
+
+2) Copy units and sudoers:
+```bash
+sudo cp systemd/*.service /etc/systemd/system/
+sudo cp ops/sudoers-aadm /etc/sudoers.d/aadm
+sudo chmod 440 /etc/sudoers.d/aadm
+```
+
+3) Reload systemd and enable manager:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now aadm.service
+```
+
+4) Verify manager health:
+```bash
+curl -s http://127.0.0.1:8899/health | jq
+```
+
+5) Create and verify one desktop:
+```bash
+curl -sX POST http://127.0.0.1:8899/v1/desktops -H 'content-type: application/json' -d '{}' | jq
+curl -s http://127.0.0.1:8899/v1/desktops/desk-1/doctor | jq
+```
 
 ---
 
 ## Orchestration strategy
 
-This repo assumes you will start per-desktop components using one of:
-
-1) **systemd template units** (recommended)
+This repo uses **systemd template units** per desktop:
 - `vnc@.service`
 - `websockify@.service`
 - `chrome@.service`
 - `aab@.service` (ai-agent-browser)
 
-2) **scripts** invoked via sudo (fallback)
-- provided in `scripts/` as examples
-
-The manager will try to use systemd by default.
+Ports are derived from display and `.env` minima:
+- `wsPort  = AADM_WEBSOCKIFY_PORT_MIN + (display - AADM_DISPLAY_MIN)`
+- `cdpPort = AADM_CDP_PORT_MIN + (display - AADM_DISPLAY_MIN)`
+- `aabPort = AADM_AAB_PORT_MIN + (display - AADM_DISPLAY_MIN)`
 
 ---
 
@@ -164,6 +197,10 @@ curl -s http://127.0.0.1:8899/v1/desktops | jq
 ```bash
 curl -s http://127.0.0.1:8899/v1/desktops/desk-3/doctor | jq
 ```
+Doctor reports:
+- systemd status for VNC/websockify/chrome/aab
+- Nginx snippet path + existence
+- port checks for VNC/websockify/CDP/AAB
 
 ### Destroy
 ```bash
@@ -222,15 +259,22 @@ npm run build
 npm run start
 ```
 
+### Test
+```bash
+npm test
+```
+
 ### Configuration knobs
 See `.env.example` for:
 - port ranges
 - nginx snippet directory
 - auth token
 - base URL template for noVNC links
+- state directory
 
 ---
 
 ## Notes
 - This repo ships scaffolding and safe patterns. You’ll likely adjust unit files and paths to match your host distro and your existing noVNC install.
 - Keep CDP and ai-agent-browser bound to localhost. Use SSH tunnels for access.
+- Startup now fails fast if configured `nginx` or `systemctl` binaries are not executable.

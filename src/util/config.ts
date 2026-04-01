@@ -1,5 +1,6 @@
 import { z } from "zod";
 import dotenv from "dotenv";
+import path from "node:path";
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ export const Config = z.object({
   nginxSnippetDir: z.string().default("/etc/nginx/conf.d/agent-desktops"),
   nginxBin: z.string().default("/usr/sbin/nginx"),
   systemctlBin: z.string().default("/bin/systemctl"),
+  stateDir: z.string().default(path.resolve("data")),
 
   novncPathPrefix: z.string().default("/desktop"),
 
@@ -54,6 +56,7 @@ export const config = Config.parse({
   nginxSnippetDir: process.env.AADM_NGINX_SNIPPET_DIR ?? "/etc/nginx/conf.d/agent-desktops",
   nginxBin: process.env.AADM_NGINX_BIN ?? "/usr/sbin/nginx",
   systemctlBin: process.env.AADM_SYSTEMCTL_BIN ?? "/bin/systemctl",
+  stateDir: process.env.AADM_STATE_DIR ?? path.resolve("data"),
 
   novncPathPrefix: process.env.AADM_NOVNC_PATH_PREFIX ?? "/desktop",
 
@@ -74,3 +77,39 @@ export const config = Config.parse({
   unitChrome: process.env.AADM_UNIT_CHROME ?? "chrome@",
   unitAab: process.env.AADM_UNIT_AAB ?? "aab@",
 });
+
+function validateConfig() {
+  const checkRange = (name: string, min: number, max: number) => {
+    if (min > max) {
+      throw new Error(`invalid_config:${name}:min_gt_max (${min} > ${max})`);
+    }
+  };
+
+  checkRange("display", config.displayMin, config.displayMax);
+  checkRange("websockify_port", config.wsPortMin, config.wsPortMax);
+  checkRange("cdp_port", config.cdpPortMin, config.cdpPortMax);
+  checkRange("aab_port", config.aabPortMin, config.aabPortMax);
+
+  const displaySpan = config.displayMax - config.displayMin;
+  const wsNeededMax = config.wsPortMin + displaySpan;
+  const cdpNeededMax = config.cdpPortMin + displaySpan;
+  const aabNeededMax = config.aabPortMin + displaySpan;
+
+  if (wsNeededMax > config.wsPortMax) {
+    throw new Error(
+      `invalid_config:websockify_range_too_small (need max >= ${wsNeededMax}, got ${config.wsPortMax})`,
+    );
+  }
+  if (cdpNeededMax > config.cdpPortMax) {
+    throw new Error(
+      `invalid_config:cdp_range_too_small (need max >= ${cdpNeededMax}, got ${config.cdpPortMax})`,
+    );
+  }
+  if (aabNeededMax > config.aabPortMax) {
+    throw new Error(
+      `invalid_config:aab_range_too_small (need max >= ${aabNeededMax}, got ${config.aabPortMax})`,
+    );
+  }
+}
+
+validateConfig();

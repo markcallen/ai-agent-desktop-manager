@@ -10,9 +10,13 @@ aadm ALL=NOPASSWD: /bin/systemctl reload nginx
 # If your unit names differ, update this file and the .env.
 aadm ALL=NOPASSWD: /bin/systemctl start vnc@*
 aadm ALL=NOPASSWD: /bin/systemctl stop vnc@*
+aadm ALL=NOPASSWD: /bin/systemctl is-active vnc@*
 aadm ALL=NOPASSWD: /bin/systemctl start websockify@*
 aadm ALL=NOPASSWD: /bin/systemctl stop websockify@*
+aadm ALL=NOPASSWD: /bin/systemctl is-active websockify@*
 aadm ALL=NOPASSWD: /bin/systemctl start chrome@*
 aadm ALL=NOPASSWD: /bin/systemctl stop chrome@*
+aadm ALL=NOPASSWD: /bin/systemctl is-active chrome@*
 aadm ALL=NOPASSWD: /bin/systemctl start aab@*
 aadm ALL=NOPASSWD: /bin/systemctl stop aab@*
+aadm ALL=NOPASSWD: /bin/systemctl is-active aab@*

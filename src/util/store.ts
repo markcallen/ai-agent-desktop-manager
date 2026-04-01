@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { config } from "./config.js";
 
 export type DesktopRecord = {
   id: string;
@@ -21,11 +22,11 @@ export type DesktopRecord = {
 
 type State = { desktops: DesktopRecord[] };
 
-const dataDir = path.resolve("data");
-const statePath = path.join(dataDir, "state.json");
+const stateDir = path.resolve(config.stateDir);
+const statePath = path.join(stateDir, "state.json");
 
 async function ensure() {
-  await fs.mkdir(dataDir, { recursive: true });
+  await fs.mkdir(stateDir, { recursive: true });
 }
 
 export async function loadState(): Promise<State> {
@@ -42,9 +43,19 @@ export async function loadState(): Promise<State> {
 
 export async function saveState(state: State) {
   await ensure();
-  await fs.writeFile(statePath, JSON.stringify(state, null, 2), "utf-8");
+  const tmp = path.join(stateDir, `.state.${process.pid}.${Date.now()}.tmp`);
+  await fs.writeFile(tmp, JSON.stringify(state, null, 2), "utf-8");
+  await fs.rename(tmp, statePath);
 }
 
 export function nowMs() {
   return Date.now();
+}
+
+export function getStateDir() {
+  return stateDir;
+}
+
+export function getStatePath() {
+  return statePath;
 }

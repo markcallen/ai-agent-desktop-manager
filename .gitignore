@@ -8,3 +8,4 @@ infra/smoke-test/.runtime/
 infra/smoke-test/*.tfstate
 infra/smoke-test/*.tfstate.*
 tasks/
+.ballast/

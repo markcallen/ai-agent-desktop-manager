@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
 import path from 'node:path';
+import {
+  RouteAuthModeSchema,
+  parseForwardedHeaderNames
+} from './route-auth.js';
 
 dotenv.config();
 
@@ -17,6 +21,9 @@ export const Config = z.object({
   port: z.number().int().default(8899),
 
   authToken: z.string().optional(),
+  desktopRouteAuthMode: RouteAuthModeSchema.default('none'),
+  desktopRouteAuthRequestUrl: z.string().url().optional(),
+  desktopRouteAuthRequestHeaders: z.array(z.string()).default([]),
 
   publicBaseUrl: z.string().url().default('https://host.example.com'),
 
@@ -50,6 +57,13 @@ export const config = Config.parse({
   port: intFromEnv('AADM_PORT', 8899),
 
   authToken: process.env.AADM_AUTH_TOKEN || undefined,
+  desktopRouteAuthMode:
+    process.env.AADM_DESKTOP_ROUTE_AUTH_MODE ?? 'none',
+  desktopRouteAuthRequestUrl:
+    process.env.AADM_DESKTOP_ROUTE_AUTH_REQUEST_URL || undefined,
+  desktopRouteAuthRequestHeaders: parseForwardedHeaderNames(
+    process.env.AADM_DESKTOP_ROUTE_AUTH_REQUEST_HEADERS
+  ),
 
   publicBaseUrl: process.env.AADM_PUBLIC_BASE_URL ?? 'https://host.example.com',
 
@@ -109,6 +123,15 @@ function validateConfig() {
   if (aabNeededMax > config.aabPortMax) {
     throw new Error(
       `invalid_config:aab_range_too_small (need max >= ${aabNeededMax}, got ${config.aabPortMax})`
+    );
+  }
+
+  if (
+    config.desktopRouteAuthMode === 'auth_request' &&
+    !config.desktopRouteAuthRequestUrl
+  ) {
+    throw new Error(
+      'invalid_config:desktop_route_auth_request_url_required'
     );
   }
 }

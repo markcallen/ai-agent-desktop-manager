@@ -24,6 +24,13 @@ async function importServerWithEnv() {
   const configMod = await import('../../src/util/config.ts');
   const netMod = await import('../../src/util/net.ts');
   configMod.config.authToken = 'test-token';
+  configMod.config.desktopRouteAuthMode = 'none';
+  configMod.config.desktopRouteAuthRequestUrl =
+    'http://127.0.0.1:3001/verify';
+  configMod.config.desktopRouteAuthRequestHeaders = [
+    'x-auth-request-user',
+    'x-orchestrator-token'
+  ];
   configMod.config.stateDir = stateDir;
   configMod.config.nginxSnippetDir = nginxDir;
   configMod.config.publicBaseUrl = 'https://host.example.com';
@@ -148,10 +155,62 @@ test(
     const body = doctor.json();
     assert.equal(body.ok, true);
     assert.equal(body.checks.nginx.snippetExists, true);
+    assert.equal(body.checks.nginx.protected, false);
     assert.equal(body.checks.ports.vnc, true);
     assert.equal(body.checks.ports.websockify, true);
     assert.equal(body.checks.ports.cdp, true);
     assert.equal(body.checks.ports.aab, true);
+    assert.deepEqual(body.routeAuth, { mode: 'none' });
+  }
+);
+
+test(
+  'create with auth_request route protection persists metadata and doctor reports it',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+    calls = [];
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      payload: {
+        owner: 'codex',
+        label: 'protected',
+        routeAuthMode: 'auth_request'
+      }
+    });
+    assert.equal(create.statusCode, 200);
+    assert.deepEqual(create.json().routeAuth, {
+      mode: 'auth_request',
+      authRequest: {
+        url: 'http://127.0.0.1:3001/verify',
+        forwardedHeaders: ['x-auth-request-user', 'x-orchestrator-token']
+      }
+    });
+
+    const getDesktop = await app.inject({
+      method: 'GET',
+      url: '/v1/desktops/desk-2',
+      headers: authHeaders
+    });
+    assert.equal(getDesktop.statusCode, 200);
+    assert.equal(getDesktop.json().routeAuth.mode, 'auth_request');
+
+    const doctor = await app.inject({
+      method: 'GET',
+      url: '/v1/desktops/desk-2/doctor',
+      headers: authHeaders
+    });
+    assert.equal(doctor.statusCode, 200);
+    assert.equal(doctor.json().checks.nginx.protected, true);
+    assert.equal(doctor.json().routeAuth.mode, 'auth_request');
+
+    const snippetPath = path.join(tmpRoot, 'nginx', 'desk-2.conf');
+    const snippet = await fs.readFile(snippetPath, 'utf-8');
+    assert.match(snippet, /auth_request \/_aadm\/auth\/desk-2;/);
+    assert.match(snippet, /proxy_pass http:\/\/127\.0\.0\.1:3001\/verify;/);
   }
 );
 
@@ -163,11 +222,24 @@ test(
     calls = [];
     failNginxTest = true;
 
+    const before = await app.inject({
+      method: 'GET',
+      url: '/v1/desktops',
+      headers: authHeaders
+    });
+    assert.equal(before.statusCode, 200);
+    const beforeDesktops = before.json().desktops;
+    const failedDisplay = beforeDesktops.length + 1;
+
     const create = await app.inject({
       method: 'POST',
       url: '/v1/desktops',
       headers: { ...authHeaders, 'content-type': 'application/json' },
-      payload: { owner: 'codex', label: 'rollback' }
+      payload: {
+        owner: 'codex',
+        label: 'rollback',
+        routeAuthMode: 'auth_request'
+      }
     });
     assert.equal(create.statusCode, 500);
 
@@ -179,11 +251,11 @@ test(
     assert.equal(list.statusCode, 200);
     assert.equal(
       list.json().desktops.length,
-      1,
-      'only initial successful desktop should remain'
+      beforeDesktops.length,
+      'failed create should not add a desktop record'
     );
 
-    const snippetPath = path.join(tmpRoot, 'nginx', 'desk-2.conf');
+    const snippetPath = path.join(tmpRoot, 'nginx', `desk-${failedDisplay}.conf`);
     await assert.rejects(fs.access(snippetPath));
 
     const stopCalls = calls.filter(
@@ -202,6 +274,15 @@ test(
     failNginxTest = false;
     saveFailuresRemaining = 1;
 
+    const before = await app.inject({
+      method: 'GET',
+      url: '/v1/desktops',
+      headers: authHeaders
+    });
+    assert.equal(before.statusCode, 200);
+    const beforeDesktops = before.json().desktops;
+    const failedDisplay = beforeDesktops.length + 1;
+
     const create = await app.inject({
       method: 'POST',
       url: '/v1/desktops',
@@ -219,11 +300,11 @@ test(
     assert.equal(list.statusCode, 200);
     assert.equal(
       list.json().desktops.length,
-      1,
+      beforeDesktops.length,
       'state save failure should not add a partial desktop record'
     );
 
-    const snippetPath = path.join(tmpRoot, 'nginx', 'desk-2.conf');
+    const snippetPath = path.join(tmpRoot, 'nginx', `desk-${failedDisplay}.conf`);
     await assert.rejects(fs.access(snippetPath));
 
     const stopCalls = calls.filter(
@@ -241,6 +322,14 @@ test(
     calls = [];
     saveFailuresRemaining = 1;
 
+    const before = await app.inject({
+      method: 'GET',
+      url: '/v1/desktops',
+      headers: authHeaders
+    });
+    assert.equal(before.statusCode, 200);
+    const beforeDesktops = before.json().desktops;
+
     const destroy = await app.inject({
       method: 'DELETE',
       url: '/v1/desktops/desk-1',
@@ -257,7 +346,7 @@ test(
     assert.equal(list.statusCode, 200);
     assert.equal(
       list.json().desktops.length,
-      1,
+      beforeDesktops.length,
       'destroy save failure should preserve the persisted desktop record'
     );
 

@@ -32,6 +32,7 @@ import {
 import { CreateDesktopBody } from './api/types.js';
 import { isPortOpen } from './util/net.js';
 import { appVersion } from './util/app-version.js';
+import { resolveDesktopRouteAuth } from './util/route-auth.js';
 
 function desktopId(display: number) {
   return `desk-${display}`;
@@ -156,14 +157,19 @@ async function removeSnippetAndReload(
 }
 
 async function restoreSnippetAndReload(
-  desktop: Pick<DesktopRecord, 'id' | 'display' | 'wsPort'>,
+  desktop: Pick<DesktopRecord, 'id' | 'display' | 'wsPort' | 'routeAuth'>,
   log: { warn: (obj: unknown, msg: string) => void }
 ) {
   const issues: string[] = [];
   try {
     await writeSnippet(
       desktop.id,
-      buildSnippet(desktop.display, desktop.wsPort)
+      buildSnippet(
+        desktop.id,
+        desktop.display,
+        desktop.wsPort,
+        desktop.routeAuth
+      )
     );
     const testRes = await nginxTest();
     if (!testRes.ok) {
@@ -274,6 +280,16 @@ export function buildApp() {
 
       const novncUrl = novncUrlFor(alloc.display);
       const aabUrl = aabUrlFor(alloc.aabPort);
+      let routeAuth;
+      try {
+        routeAuth = resolveDesktopRouteAuth(config, parsed.data.routeAuthMode);
+      } catch (e) {
+        return reply.code(500).send({
+          ok: false,
+          error: 'route_auth_config_invalid',
+          details: String((e as Error)?.message ?? e)
+        });
+      }
 
       const record: DesktopRecord = {
         id,
@@ -290,7 +306,8 @@ export function buildApp() {
         aabPort: alloc.aabPort,
         novncUrl,
         aabUrl,
-        startUrl: parsed.data.startUrl
+        startUrl: parsed.data.startUrl,
+        routeAuth
       };
 
       // 1) start units
@@ -307,7 +324,12 @@ export function buildApp() {
       // 2) write nginx snippet
       let snippetWritten = false;
       try {
-        const snippet = buildSnippet(alloc.display, alloc.wsPort);
+        const snippet = buildSnippet(
+          id,
+          alloc.display,
+          alloc.wsPort,
+          routeAuth
+        );
         await writeSnippet(id, snippet);
         snippetWritten = true;
 
@@ -364,7 +386,8 @@ export function buildApp() {
         novncUrl: record.novncUrl,
         aabUrl: record.aabUrl,
         cdp: { host: '127.0.0.1', port: record.cdpPort },
-        status: record.status
+        status: record.status,
+        routeAuth: record.routeAuth
       };
     });
   });
@@ -480,7 +503,8 @@ export function buildApp() {
         aab: aabPortOpen
       },
       nginx: {
-        snippetExists
+        snippetExists,
+        protected: d.routeAuth.mode !== 'none'
       }
     };
 
@@ -496,6 +520,7 @@ export function buildApp() {
         checks.ports.aab &&
         checks.nginx.snippetExists,
       desktop: d,
+      routeAuth: d.routeAuth,
       checks,
       systemd: {
         vnc: {

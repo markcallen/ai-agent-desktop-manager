@@ -1,6 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.js';
+import {
+  normalizeDesktopRouteAuth,
+  type DesktopRouteAuth
+} from './route-auth.js';
 
 export type DesktopRecord = {
   id: string;
@@ -18,6 +22,7 @@ export type DesktopRecord = {
   novncUrl: string;
   aabUrl: string;
   startUrl?: string;
+  routeAuth: DesktopRouteAuth;
 };
 
 export type State = { desktops: DesktopRecord[] };
@@ -41,7 +46,21 @@ export async function loadState(): Promise<State> {
   try {
     const raw = await fs.readFile(statePath, 'utf-8');
     const parsed = JSON.parse(raw);
-    return { desktops: Array.isArray(parsed.desktops) ? parsed.desktops : [] };
+    const desktops: Array<Record<string, unknown>> = Array.isArray(
+      parsed.desktops
+    )
+      ? parsed.desktops
+      : [];
+    return {
+      desktops: desktops.map(
+        (desktop): DesktopRecord =>
+          ({
+            ...(desktop as DesktopRecord),
+            routeAuth:
+              normalizeDesktopRouteAuth(desktop.routeAuth) ?? { mode: 'none' }
+          }) as DesktopRecord
+      )
+    };
   } catch (e) {
     if ((e as NodeJS.ErrnoException)?.code === 'ENOENT')
       return { desktops: [] };

@@ -48,6 +48,17 @@ npm install
 npm run build
 ```
 
+For server deployments, prefer the release artifact from GitHub Releases instead of cloning the repo. Each release publishes `ai-agent-desktop-manager-vX.Y.Z-linux-x64.tar.gz`.
+
+### Install from release artifact
+
+```bash
+curl -LO https://github.com/markcallen/ai-agent-desktop-manager/releases/download/vX.Y.Z/ai-agent-desktop-manager-vX.Y.Z-linux-x64.tar.gz
+tar -xzf ai-agent-desktop-manager-vX.Y.Z-linux-x64.tar.gz
+cd ai-agent-desktop-manager
+sudo ./scripts/install-release.sh
+```
+
 ### Configure
 
 Copy and edit `.env.example`:
@@ -146,35 +157,39 @@ This allows:
 
 ## Deployment runbook (systemd)
 
-1. Build the project:
+1. Download and unpack the release artifact:
 
 ```bash
-npm install
-npm run build
+curl -LO https://github.com/markcallen/ai-agent-desktop-manager/releases/download/vX.Y.Z/ai-agent-desktop-manager-vX.Y.Z-linux-x64.tar.gz
+tar -xzf ai-agent-desktop-manager-vX.Y.Z-linux-x64.tar.gz
+cd ai-agent-desktop-manager
 ```
 
-2. Copy units and sudoers:
+2. Install runtime dependencies and service files:
 
 ```bash
-sudo cp systemd/*.service /etc/systemd/system/
-sudo cp ops/sudoers-aadm /etc/sudoers.d/aadm
-sudo chmod 440 /etc/sudoers.d/aadm
+sudo ./scripts/install-release.sh
 ```
 
-3. Reload systemd and enable manager:
+3. Review and edit the environment file:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now aadm.service
+sudoedit /opt/ai-agent-desktop-manager/.env
 ```
 
-4. Verify manager health:
+4. Reload systemd and restart manager:
+
+```bash
+sudo systemctl restart aadm.service
+```
+
+5. Verify manager health:
 
 ```bash
 curl -s http://127.0.0.1:8899/health | jq
 ```
 
-5. Create and verify one desktop:
+6. Create and verify one desktop:
 
 ```bash
 curl -sX POST http://127.0.0.1:8899/v1/desktops -H 'content-type: application/json' -d '{}' | jq
@@ -255,6 +270,15 @@ ssh -L 8899:127.0.0.1:8899 user@server
 Now your agent running locally can call:
 
 - `http://127.0.0.1:8899`
+
+---
+
+## Publishing releases
+
+GitHub Actions publishes the Linux server artifact from `.github/workflows/publish.yml`.
+
+- `workflow_dispatch` creates the next `patch`, `minor`, or `major` tag, then builds and publishes the artifact.
+- Pushing a `v*` tag builds the artifact from that exact tag and attaches it to a GitHub Release.
 
 ---
 

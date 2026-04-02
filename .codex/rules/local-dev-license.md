@@ -5,6 +5,7 @@ These rules are intended for Codex (CLI and app).
 Ensure proper license configuration (LICENSE file, package.json, README reference). Default: MIT. Overridable in AGENTS.md or CLAUDE.md.
 
 ---
+
 # License Setup for Projects
 
 When setting up or working on projects, ensure proper license configuration for legal clarity and reuse.
@@ -60,7 +61,6 @@ Replace `<YEAR>` with the current year and `<COPYRIGHT HOLDER>` with the author/
 ## Example README Addition
 
 ```markdown
-
 ## License
 
 Default license for this project: Apache-2.0 (or ISC, BSD-3-Clause, etc.)
@@ -81,7 +81,6 @@ When such a section exists, use the specified license instead of MIT. If both fi
 Projects may specify a non-MIT license in `AGENTS.md` or `CLAUDE.md`:
 
 ```markdown
-
 ## License
 
 Default license for this project: Apache-2.0 (or ISC, BSD-3-Clause, etc.)

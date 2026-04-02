@@ -3,6 +3,7 @@
 Use GitHub MCP and/or issues MCP (Jira, Linear, GitHub Issues) when available to support local development context. Only apply when these MCP servers are enabled.
 
 ---
+
 # Optional: GitHub and Issues MCP Servers
 
 When the user has **GitHub MCP** and/or **issues MCP** (Jira, Linear, or GitHub Issues) servers enabled, use them to support local development workflow and context.

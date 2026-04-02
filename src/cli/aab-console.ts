@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-import fs from "node:fs/promises";
-import { argv, env, exit } from "node:process";
+import fs from 'node:fs/promises';
+import { argv, env, exit } from 'node:process';
 
-type Command = "follow" | "eval" | "navigate" | "page-info" | "screenshot";
+type Command = 'follow' | 'eval' | 'navigate' | 'page-info' | 'screenshot';
 
 type EventMessage = {
   event: string;
-  data: any;
+  data: Record<string, unknown>;
 };
 
 type ResponseMessage = {
@@ -27,83 +27,97 @@ function has(name: string) {
 }
 
 function command(): Command {
-  const cmd = (argv[2] as Command | undefined) ?? "follow";
-  if (["follow", "eval", "navigate", "page-info", "screenshot"].includes(cmd)) {
+  const cmd = (argv[2] as Command | undefined) ?? 'follow';
+  if (['follow', 'eval', 'navigate', 'page-info', 'screenshot'].includes(cmd)) {
     return cmd;
   }
-  console.error("Unknown command. Use: follow|eval|navigate|page-info|screenshot");
+  console.error(
+    'Unknown command. Use: follow|eval|navigate|page-info|screenshot'
+  );
   exit(2);
 }
 
 function positional(index: number) {
   const args = argv.slice(3).filter((arg, i, items) => {
-    if (!arg.startsWith("--")) return true;
+    if (!arg.startsWith('--')) return true;
     const next = items[i + 1];
-    return next === undefined || next.startsWith("--");
+    return next === undefined || next.startsWith('--');
   });
   return args[index];
 }
 
 function baseUrl() {
-  return flag("--url") ?? env.AAB_URL ?? "http://127.0.0.1:8765";
+  return flag('--url') ?? env.AAB_URL ?? 'http://127.0.0.1:8765';
 }
 
 function wsUrl() {
-  const explicit = flag("--ws-url") ?? env.AAB_WS_URL;
+  const explicit = flag('--ws-url') ?? env.AAB_WS_URL;
   if (explicit) return explicit;
 
   const base = new URL(baseUrl());
-  base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
-  base.pathname = "/ws";
-  base.search = "";
+  base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+  base.pathname = '/ws';
+  base.search = '';
   return base.toString();
 }
 
 function outPath() {
-  return flag("--out") ?? "screenshot.png";
+  return flag('--out') ?? 'screenshot.png';
 }
 
 function followAfterCommand(cmd: Command) {
-  return has("--follow") || cmd === "follow";
+  return has('--follow') || cmd === 'follow';
 }
 
 function printEvent(msg: EventMessage) {
-  if (msg.event === "console_message") {
+  if (msg.event === 'console_message') {
     const data = msg.data ?? {};
-    const loc = data.url ? ` ${data.url}:${Number(data.lineNumber ?? 0) + 1}` : "";
-    console.log(`[console.${data.level ?? "log"}] ${data.text ?? ""}${loc}`);
+    const loc = data.url
+      ? ` ${data.url}:${Number(data.lineNumber ?? 0) + 1}`
+      : '';
+    console.log(`[console.${data.level ?? 'log'}] ${data.text ?? ''}${loc}`);
     return;
   }
 
-  if (msg.event === "page_navigated") {
-    console.log(`[page] ${msg.data?.url ?? ""}`);
+  if (msg.event === 'page_navigated') {
+    console.log(`[page] ${msg.data?.url ?? ''}`);
     return;
   }
 
-  if (msg.event === "browser_connected" || msg.event === "browser_disconnected") {
+  if (
+    msg.event === 'browser_connected' ||
+    msg.event === 'browser_disconnected'
+  ) {
     console.log(`[browser] ${msg.event} ${JSON.stringify(msg.data ?? {})}`);
     return;
   }
 
-  if (has("--verbose")) {
+  if (has('--verbose')) {
     console.log(JSON.stringify(msg));
   }
 }
 
 async function connectWebSocket() {
-  if (typeof WebSocket === "undefined") {
-    throw new Error("WebSocket is not available in this Node runtime");
+  if (typeof WebSocket === 'undefined') {
+    throw new Error('WebSocket is not available in this Node runtime');
   }
 
   const socket = new WebSocket(wsUrl());
-  const pending = new Map<string, { resolve: (value: unknown) => void; reject: (err: Error) => void }>();
+  const pending = new Map<
+    string,
+    { resolve: (value: unknown) => void; reject: (err: Error) => void }
+  >();
 
   await new Promise<void>((resolve, reject) => {
-    socket.addEventListener("open", () => resolve(), { once: true });
-    socket.addEventListener("error", () => reject(new Error("websocket_connect_failed")), { once: true });
+    socket.addEventListener('open', () => resolve(), { once: true });
+    socket.addEventListener(
+      'error',
+      () => reject(new Error('websocket_connect_failed')),
+      { once: true }
+    );
   });
 
-  socket.addEventListener("message", (event) => {
+  socket.addEventListener('message', (event) => {
     const raw = String(event.data);
     let data: EventMessage | ResponseMessage;
     try {
@@ -113,7 +127,7 @@ async function connectWebSocket() {
       return;
     }
 
-    if ("event" in data) {
+    if ('event' in data) {
       printEvent(data);
       return;
     }
@@ -124,13 +138,13 @@ async function connectWebSocket() {
     if (data.ok) {
       waiter.resolve(data.result);
     } else {
-      waiter.reject(new Error(data.error ?? "unknown_error"));
+      waiter.reject(new Error(data.error ?? 'unknown_error'));
     }
   });
 
-  socket.addEventListener("close", () => {
+  socket.addEventListener('close', () => {
     for (const waiter of pending.values()) {
-      waiter.reject(new Error("websocket_closed"));
+      waiter.reject(new Error('websocket_closed'));
     }
     pending.clear();
   });
@@ -160,16 +174,16 @@ async function waitUntilInterrupted(socket: WebSocket) {
       }
       resolve();
     };
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
   });
 }
 
 async function run() {
   const cmd = command();
 
-  if (cmd === "screenshot") {
-    const res = await fetch(new URL("/screenshot", baseUrl()));
+  if (cmd === 'screenshot') {
+    const res = await fetch(new URL('/screenshot', baseUrl()));
     if (!res.ok) {
       throw new Error(`screenshot_failed:${res.status}`);
     }
@@ -182,18 +196,22 @@ async function run() {
   const { socket, send } = await connectWebSocket();
 
   try {
-    if (cmd === "eval") {
+    if (cmd === 'eval') {
       const expression = positional(0);
-      if (!expression) throw new Error("missing expression");
-      const result = await send("evaluate", { expression });
+      if (!expression) throw new Error('missing expression');
+      const result = await send('evaluate', { expression });
       console.log(JSON.stringify(result, null, 2));
-    } else if (cmd === "navigate") {
+    } else if (cmd === 'navigate') {
       const url = positional(0);
-      if (!url) throw new Error("missing url");
-      const result = await send("navigate", { url, waitUntil: "load", timeoutMs: 15000 });
+      if (!url) throw new Error('missing url');
+      const result = await send('navigate', {
+        url,
+        waitUntil: 'load',
+        timeoutMs: 15000
+      });
       console.log(JSON.stringify(result, null, 2));
-    } else if (cmd === "page-info") {
-      const result = await send("page_info", {});
+    } else if (cmd === 'page-info') {
+      const result = await send('page_info', {});
       console.log(JSON.stringify(result, null, 2));
     }
 

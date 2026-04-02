@@ -5,6 +5,7 @@ These rules are intended for Codex (CLI and app).
 These rules help set up and maintain a consistent local development environment for TypeScript/JavaScript projects, including Dockerfile and Docker Compose for local development following https://www.markcallen.com/dockerfile-for-typescript/
 
 ---
+
 # Local Development Environment Agent
 
 You are a local development environment specialist for TypeScript/JavaScript projects.
@@ -89,7 +90,6 @@ When setting up or working on Node.js/TypeScript projects, use **nvm** (Node Ver
 ### Example README Addition
 
 ````markdown
-
 ## Prerequisites
 
 - [nvm](https://github.com/nvm-sh/nvm) (Node Version Manager)

@@ -1,31 +1,49 @@
-import Fastify from "fastify";
-import lockfile from "proper-lockfile";
-import path from "node:path";
-import fs from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import Fastify from 'fastify';
+import lockfile from 'proper-lockfile';
+import path from 'node:path';
+import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 
-import { config } from "./util/config.js";
-import { authHook } from "./util/auth.js";
-import { loadState, saveState, type DesktopRecord, nowMs, getStateDir } from "./util/store.js";
-import { allocate } from "./util/allocator.js";
-import { buildSnippet, writeSnippet, removeSnippet, nginxTest, nginxReload, snippetFilename } from "./util/nginx.js";
-import { systemctlStart, systemctlStop, systemctlIsActive, unitName } from "./util/systemd.js";
-import { CreateDesktopBody } from "./api/types.js";
-import { isPortOpen } from "./util/net.js";
+import { config } from './util/config.js';
+import { authHook } from './util/auth.js';
+import {
+  loadState,
+  saveState,
+  type DesktopRecord,
+  nowMs,
+  getStateDir
+} from './util/store.js';
+import { allocate } from './util/allocator.js';
+import {
+  buildSnippet,
+  writeSnippet,
+  removeSnippet,
+  nginxTest,
+  nginxReload,
+  snippetFilename
+} from './util/nginx.js';
+import {
+  systemctlStart,
+  systemctlStop,
+  systemctlIsActive,
+  unitName
+} from './util/systemd.js';
+import { CreateDesktopBody } from './api/types.js';
+import { isPortOpen } from './util/net.js';
 
-const VERSION = "0.1.0";
+const VERSION = '0.1.0';
 
 function desktopId(display: number) {
   return `desk-${display}`;
 }
 
 function novncUrlFor(display: number) {
-  const base = config.publicBaseUrl.replace(/\/$/, "");
-  const prefix = config.novncPathPrefix.replace(/\/$/, "");
+  const base = config.publicBaseUrl.replace(/\/$/, '');
+  const prefix = config.novncPathPrefix.replace(/\/$/, '');
   const params = new URLSearchParams({
-    path: `${prefix.replace(/^\//, "")}/${display}/websockify`,
-    resize: "remote",
-    autoconnect: "1",
+    path: `${prefix.replace(/^\//, '')}/${display}/websockify`,
+    resize: 'remote',
+    autoconnect: '1'
   });
   return `${base}${prefix}/${display}/vnc.html?${params.toString()}`;
 }
@@ -35,10 +53,12 @@ function aabUrlFor(port: number) {
 }
 
 async function withStateLock<T>(fn: () => Promise<T>): Promise<T> {
-  const lockPath = path.join(path.resolve(getStateDir()), "state.lock");
+  const lockPath = path.join(path.resolve(getStateDir()), 'state.lock');
   await fs.mkdir(path.dirname(lockPath), { recursive: true });
-  await fs.writeFile(lockPath, "", { flag: "a" });
-  const release = await lockfile.lock(lockPath, { retries: { retries: 10, factor: 1.2, minTimeout: 50, maxTimeout: 250 } });
+  await fs.writeFile(lockPath, '', { flag: 'a' });
+  const release = await lockfile.lock(lockPath, {
+    retries: { retries: 10, factor: 1.2, minTimeout: 50, maxTimeout: 250 }
+  });
   try {
     return await fn();
   } finally {
@@ -46,21 +66,27 @@ async function withStateLock<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function stopUnitsByNames(units: string[], log: { warn: (obj: unknown, msg: string) => void }) {
+async function stopUnitsByNames(
+  units: string[],
+  log: { warn: (obj: unknown, msg: string) => void }
+) {
   const errors: string[] = [];
   for (const unit of units) {
     try {
       await systemctlStop(unit);
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
+    } catch (e) {
+      const msg = String((e as Error)?.message ?? e);
       errors.push(msg);
-      log.warn({ err: e, unit }, "systemctl stop failed");
+      log.warn({ err: e, unit }, 'systemctl stop failed');
     }
   }
   return errors;
 }
 
-async function startUnits(display: number, log: { warn: (obj: unknown, msg: string) => void }) {
+async function startUnits(
+  display: number,
+  log: { warn: (obj: unknown, msg: string) => void }
+) {
   const uVnc = unitName(config.unitVnc, display);
   const uWs = unitName(config.unitWebsockify, display);
   const uChrome = unitName(config.unitChrome, display);
@@ -85,7 +111,10 @@ async function startUnits(display: number, log: { warn: (obj: unknown, msg: stri
   return { uVnc, uWs, uChrome, uAab, all: [uVnc, uWs, uChrome, uAab] };
 }
 
-async function stopUnits(display: number, log: { warn: (obj: unknown, msg: string) => void }) {
+async function stopUnits(
+  display: number,
+  log: { warn: (obj: unknown, msg: string) => void }
+) {
   const uAab = unitName(config.unitAab, display);
   const uChrome = unitName(config.unitChrome, display);
   const uWs = unitName(config.unitWebsockify, display);
@@ -99,28 +128,37 @@ async function stopUnits(display: number, log: { warn: (obj: unknown, msg: strin
 
 export function buildApp() {
   const app = Fastify({ logger: true });
-  app.addHook("preHandler", authHook);
+  app.addHook('preHandler', authHook);
 
-  app.get("/health", async () => {
-    return { ok: true, version: VERSION, uptimeSec: Math.floor(process.uptime()) };
+  app.get('/health', async () => {
+    return {
+      ok: true,
+      version: VERSION,
+      uptimeSec: Math.floor(process.uptime())
+    };
   });
 
-  app.get("/v1/desktops", async () => {
+  app.get('/v1/desktops', async () => {
     const st = await loadState();
     return { desktops: st.desktops };
   });
 
-  app.get("/v1/desktops/:id", async (req, reply) => {
-    const id = (req.params as any).id as string;
+  app.get('/v1/desktops/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
     const st = await loadState();
     const d = st.desktops.find((x) => x.id === id);
-    if (!d) return reply.code(404).send({ ok: false, error: "not_found" });
+    if (!d) return reply.code(404).send({ ok: false, error: 'not_found' });
     return d;
   });
 
-  app.post("/v1/desktops", async (req, reply) => {
+  app.post('/v1/desktops', async (req, reply) => {
     const parsed = CreateDesktopBody.safeParse(req.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+    if (!parsed.success)
+      return reply.code(400).send({
+        ok: false,
+        error: 'invalid_body',
+        details: parsed.error.flatten()
+      });
 
     return await withStateLock(async () => {
       const st = await loadState();
@@ -129,7 +167,9 @@ export function buildApp() {
       const id = desktopId(alloc.display);
       const createdAt = nowMs();
       const ttlMinutes = parsed.data.ttlMinutes;
-      const expiresAt = ttlMinutes ? createdAt + ttlMinutes * 60_000 : undefined;
+      const expiresAt = ttlMinutes
+        ? createdAt + ttlMinutes * 60_000
+        : undefined;
 
       const novncUrl = novncUrlFor(alloc.display);
       const aabUrl = aabUrlFor(alloc.aabPort);
@@ -141,7 +181,7 @@ export function buildApp() {
         ttlMinutes,
         createdAt,
         expiresAt,
-        status: "running",
+        status: 'running',
         display: alloc.display,
         vncPort: alloc.vncPort,
         wsPort: alloc.wsPort,
@@ -149,14 +189,18 @@ export function buildApp() {
         aabPort: alloc.aabPort,
         novncUrl,
         aabUrl,
-        startUrl: parsed.data.startUrl,
+        startUrl: parsed.data.startUrl
       };
 
       // 1) start units
       try {
         await startUnits(alloc.display, app.log);
-      } catch (e: any) {
-        return reply.code(500).send({ ok: false, error: "failed_start_units", details: String(e?.message ?? e) });
+      } catch (e) {
+        return reply.code(500).send({
+          ok: false,
+          error: 'failed_start_units',
+          details: String((e as Error)?.message ?? e)
+        });
       }
 
       // 2) write nginx snippet
@@ -175,16 +219,23 @@ export function buildApp() {
         if (!r.ok) {
           throw new Error(`nginx_reload_failed: ${r.stderr || r.stdout}`);
         }
-      } catch (e: any) {
+      } catch (e) {
         if (snippetWritten) {
           try {
             await removeSnippet(id);
-          } catch (cleanupErr: any) {
-            app.log.warn({ err: cleanupErr }, "failed to remove nginx snippet during rollback");
+          } catch (cleanupErr) {
+            app.log.warn(
+              { err: cleanupErr },
+              'failed to remove nginx snippet during rollback'
+            );
           }
         }
         await stopUnits(alloc.display, app.log);
-        return reply.code(500).send({ ok: false, error: "nginx_update_failed", details: String(e?.message ?? e) });
+        return reply.code(500).send({
+          ok: false,
+          error: 'nginx_update_failed',
+          details: String((e as Error)?.message ?? e)
+        });
       }
 
       st.desktops.push(record);
@@ -195,19 +246,20 @@ export function buildApp() {
         display: record.display,
         novncUrl: record.novncUrl,
         aabUrl: record.aabUrl,
-        cdp: { host: "127.0.0.1", port: record.cdpPort },
-        status: record.status,
+        cdp: { host: '127.0.0.1', port: record.cdpPort },
+        status: record.status
       };
     });
   });
 
-  app.delete("/v1/desktops/:id", async (req, reply) => {
-    const id = (req.params as any).id as string;
+  app.delete('/v1/desktops/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
 
     return await withStateLock(async () => {
       const st = await loadState();
       const idx = st.desktops.findIndex((x) => x.id === id);
-      if (idx === -1) return reply.code(404).send({ ok: false, error: "not_found" });
+      if (idx === -1)
+        return reply.code(404).send({ ok: false, error: 'not_found' });
 
       const d = st.desktops[idx];
 
@@ -218,14 +270,14 @@ export function buildApp() {
         await removeSnippet(id);
         const t = await nginxTest();
         if (!t.ok) {
-          nginxIssue = t.stderr || t.stdout || "nginx test failed";
+          nginxIssue = t.stderr || t.stdout || 'nginx test failed';
         } else {
           const r = await nginxReload();
-          if (!r.ok) nginxIssue = r.stderr || r.stdout || "nginx reload failed";
+          if (!r.ok) nginxIssue = r.stderr || r.stdout || 'nginx reload failed';
         }
-      } catch (e: any) {
-        nginxIssue = String(e?.message ?? e);
-        app.log.warn({ err: e }, "nginx cleanup failed");
+      } catch (e) {
+        nginxIssue = String((e as Error)?.message ?? e);
+        app.log.warn({ err: e }, 'nginx cleanup failed');
       }
 
       st.desktops.splice(idx, 1);
@@ -235,32 +287,41 @@ export function buildApp() {
         ok: true,
         warnings: {
           stopErrors: stopRes.errors,
-          nginxIssue,
-        },
+          nginxIssue
+        }
       };
     });
   });
 
-  app.get("/v1/desktops/:id/doctor", async (req, reply) => {
-    const id = (req.params as any).id as string;
+  app.get('/v1/desktops/:id/doctor', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
     const st = await loadState();
     const d = st.desktops.find((x) => x.id === id);
-    if (!d) return reply.code(404).send({ ok: false, error: "not_found" });
+    if (!d) return reply.code(404).send({ ok: false, error: 'not_found' });
 
     const uVnc = unitName(config.unitVnc, d.display);
     const uWs = unitName(config.unitWebsockify, d.display);
     const uChrome = unitName(config.unitChrome, d.display);
     const uAab = unitName(config.unitAab, d.display);
 
-    const [aVnc, aWs, aChrome, aAab, vncPortOpen, wsPortOpen, cdpPortOpen, aabPortOpen] = await Promise.all([
+    const [
+      aVnc,
+      aWs,
+      aChrome,
+      aAab,
+      vncPortOpen,
+      wsPortOpen,
+      cdpPortOpen,
+      aabPortOpen
+    ] = await Promise.all([
       systemctlIsActive(uVnc),
       systemctlIsActive(uWs),
       systemctlIsActive(uChrome),
       systemctlIsActive(uAab),
-      isPortOpen("127.0.0.1", d.vncPort),
-      isPortOpen("127.0.0.1", d.wsPort),
-      isPortOpen("127.0.0.1", d.cdpPort),
-      isPortOpen("127.0.0.1", d.aabPort),
+      isPortOpen('127.0.0.1', d.vncPort),
+      isPortOpen('127.0.0.1', d.wsPort),
+      isPortOpen('127.0.0.1', d.cdpPort),
+      isPortOpen('127.0.0.1', d.aabPort)
     ]);
 
     const snippetPath = snippetFilename(id);
@@ -269,7 +330,7 @@ export function buildApp() {
       await fs.access(snippetPath);
       snippetExists = true;
     } catch {
-      snippetExists = false;
+      // snippetExists remains false
     }
 
     const checks = {
@@ -277,21 +338,22 @@ export function buildApp() {
         vnc: aVnc.code === 0,
         websockify: aWs.code === 0,
         chrome: aChrome.code === 0,
-        aab: aAab.code === 0,
+        aab: aAab.code === 0
       },
       ports: {
         vnc: vncPortOpen,
         websockify: wsPortOpen,
         cdp: cdpPortOpen,
-        aab: aabPortOpen,
+        aab: aabPortOpen
       },
       nginx: {
-        snippetExists,
-      },
+        snippetExists
+      }
     };
 
     return {
-      ok: checks.services.vnc &&
+      ok:
+        checks.services.vnc &&
         checks.services.websockify &&
         checks.services.chrome &&
         checks.services.aab &&
@@ -303,19 +365,35 @@ export function buildApp() {
       desktop: d,
       checks,
       systemd: {
-        vnc: { unit: uVnc, code: aVnc.code, status: aVnc.stdout.trim() || aVnc.stderr.trim() },
-        websockify: { unit: uWs, code: aWs.code, status: aWs.stdout.trim() || aWs.stderr.trim() },
-        chrome: { unit: uChrome, code: aChrome.code, status: aChrome.stdout.trim() || aChrome.stderr.trim() },
-        aab: { unit: uAab, code: aAab.code, status: aAab.stdout.trim() || aAab.stderr.trim() },
+        vnc: {
+          unit: uVnc,
+          code: aVnc.code,
+          status: aVnc.stdout.trim() || aVnc.stderr.trim()
+        },
+        websockify: {
+          unit: uWs,
+          code: aWs.code,
+          status: aWs.stdout.trim() || aWs.stderr.trim()
+        },
+        chrome: {
+          unit: uChrome,
+          code: aChrome.code,
+          status: aChrome.stdout.trim() || aChrome.stderr.trim()
+        },
+        aab: {
+          unit: uAab,
+          code: aAab.code,
+          status: aAab.stdout.trim() || aAab.stderr.trim()
+        }
       },
       nginx: {
         snippetPath,
-        snippetExists,
+        snippetExists
       },
       links: {
         novncUrl: d.novncUrl,
-        aabUrl: d.aabUrl,
-      },
+        aabUrl: d.aabUrl
+      }
     };
   });
 
@@ -330,6 +408,9 @@ export async function startServer() {
 
   const app = buildApp();
   await app.listen({ host: config.host, port: config.port });
-  app.log.info({ host: config.host, port: config.port }, "ai-agent-desktop-manager started");
+  app.log.info(
+    { host: config.host, port: config.port },
+    'ai-agent-desktop-manager started'
+  );
   return app;
 }

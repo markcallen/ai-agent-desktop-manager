@@ -1,8 +1,16 @@
-import net from "node:net";
+import net from 'node:net';
 
-export type PortChecker = (host: string, port: number, timeoutMs?: number) => Promise<boolean>;
+export type PortChecker = (
+  host: string,
+  port: number,
+  timeoutMs?: number
+) => Promise<boolean>;
 
-async function defaultPortChecker(host: string, port: number, timeoutMs = 250): Promise<boolean> {
+async function defaultPortChecker(
+  host: string,
+  port: number,
+  timeoutMs = 250
+): Promise<boolean> {
   return await new Promise((resolve) => {
     const socket = new net.Socket();
     let done = false;
@@ -15,16 +23,20 @@ async function defaultPortChecker(host: string, port: number, timeoutMs = 250): 
     };
 
     socket.setTimeout(timeoutMs);
-    socket.once("connect", () => finish(true));
-    socket.once("timeout", () => finish(false));
-    socket.once("error", () => finish(false));
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
     socket.connect(port, host);
   });
 }
 
 let portChecker: PortChecker = defaultPortChecker;
 
-export async function isPortOpen(host: string, port: number, timeoutMs = 250): Promise<boolean> {
+export async function isPortOpen(
+  host: string,
+  port: number,
+  timeoutMs = 250
+): Promise<boolean> {
   return portChecker(host, port, timeoutMs);
 }
 

@@ -5,6 +5,7 @@ These rules are intended for Codex (CLI and app).
 These rules keep documentation accurate and current using GitHub Markdown by default, or an existing Docusaurus site when the repository already uses one.
 
 ---
+
 # Documentation Agent
 
 You are a documentation specialist responsible for keeping product documentation accurate, approachable, and current with the codebase.

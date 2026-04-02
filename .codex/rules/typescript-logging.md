@@ -5,6 +5,7 @@ These rules are intended for Codex (CLI and app).
 These rules provide instructions for configuring Pino with Fluentd (Node.js, Next.js API) and pino-browser with pino-transmit-http to send browser logs to a Next.js /api/logs endpoint.
 
 ---
+
 # Centralized Logging Agent
 
 You are a centralized logging specialist for TypeScript/JavaScript applications. Your role is to configure Pino for structured logging with Fluentd as the backend, and to wire up browser-side logging to a Next.js `/api/logs` endpoint.

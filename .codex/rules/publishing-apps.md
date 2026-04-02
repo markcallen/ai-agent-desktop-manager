@@ -4,8 +4,8 @@
 These rules are intended for Codex (CLI and app).
 
 These rules help design and maintain release workflows for libraries, SDKs, and apps.
-
 ---
+
 # Publishing Apps Agent
 
 You are a publishing specialist for installable apps and CLIs.

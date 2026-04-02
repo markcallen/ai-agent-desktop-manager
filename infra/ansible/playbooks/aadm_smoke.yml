@@ -10,11 +10,11 @@
     aadm_state_dir: /opt/ai-agent-desktop-manager/data
     aadm_nginx_snippet_dir: /etc/nginx/conf.d/agent-desktops
     aadm_repo_archive_remote: /tmp/ai-agent-desktop-manager.tgz
-    aadm_repo_archive_local: ""
+    aadm_repo_archive_local: ''
     aab_repo_archive_remote: /tmp/ai-agent-browser.tgz
-    aab_repo_archive_local: ""
-    aadm_public_base_url: ""
-    aadm_auth_token: ""
+    aab_repo_archive_local: ''
+    aadm_public_base_url: ''
+    aadm_auth_token: ''
     aadm_npm_global_bin: /usr/local/bin
     aadm_npm_package: ai-agent-browser
     aadm_smoke_create_desktop: true
@@ -67,7 +67,7 @@
       ansible.builtin.get_url:
         url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
         dest: /tmp/nodesource.gpg.key
-        mode: "0644"
+        mode: '0644'
 
     - name: Dearmor NodeSource GPG key
       ansible.builtin.command:
@@ -78,7 +78,7 @@
     - name: Configure NodeSource repository
       ansible.builtin.copy:
         dest: /etc/apt/sources.list.d/nodesource.list
-        mode: "0644"
+        mode: '0644'
         content: |
           deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main
 
@@ -91,7 +91,7 @@
       ansible.builtin.get_url:
         url: https://dl.google.com/linux/linux_signing_key.pub
         dest: /tmp/google-linux-signing-key.pub
-        mode: "0644"
+        mode: '0644'
 
     - name: Dearmor Google Chrome signing key
       ansible.builtin.command:
@@ -102,7 +102,7 @@
     - name: Configure Google Chrome repository
       ansible.builtin.copy:
         dest: /etc/apt/sources.list.d/google-chrome.list
-        mode: "0644"
+        mode: '0644'
         content: |
           deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main
 
@@ -113,13 +113,13 @@
 
     - name: Ensure service group exists
       ansible.builtin.group:
-        name: "{{ aadm_service_group }}"
+        name: '{{ aadm_service_group }}'
         system: true
 
     - name: Ensure service user exists
       ansible.builtin.user:
-        name: "{{ aadm_service_user }}"
-        group: "{{ aadm_service_group }}"
+        name: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
         create_home: true
         home: /var/lib/aadm
         shell: /usr/sbin/nologin
@@ -129,16 +129,16 @@
       ansible.builtin.file:
         path: /var/lib/aadm/.vnc
         state: directory
-        owner: "{{ aadm_service_user }}"
-        group: "{{ aadm_service_group }}"
-        mode: "0700"
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0700'
 
     - name: Install VNC xstartup
       ansible.builtin.copy:
         dest: /var/lib/aadm/.vnc/xstartup
-        owner: "{{ aadm_service_user }}"
-        group: "{{ aadm_service_group }}"
-        mode: "0755"
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0755'
         content: |
           #!/bin/sh
           unset SESSION_MANAGER
@@ -154,82 +154,82 @@
 
     - name: Ensure install directory exists
       ansible.builtin.file:
-        path: "{{ aadm_install_dir }}"
+        path: '{{ aadm_install_dir }}'
         state: directory
-        owner: "{{ aadm_service_user }}"
-        group: "{{ aadm_service_group }}"
-        mode: "0755"
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0755'
 
     - name: Ensure ai-agent-browser install directory exists
       ansible.builtin.file:
-        path: "{{ aab_install_dir }}"
+        path: '{{ aab_install_dir }}'
         state: directory
-        owner: "{{ aadm_service_user }}"
-        group: "{{ aadm_service_group }}"
-        mode: "0755"
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0755'
 
     - name: Upload repository archive
       ansible.builtin.copy:
-        src: "{{ aadm_repo_archive_local }}"
-        dest: "{{ aadm_repo_archive_remote }}"
-        mode: "0644"
+        src: '{{ aadm_repo_archive_local }}'
+        dest: '{{ aadm_repo_archive_remote }}'
+        mode: '0644'
 
     - name: Upload ai-agent-browser archive
       ansible.builtin.copy:
-        src: "{{ aab_repo_archive_local }}"
-        dest: "{{ aab_repo_archive_remote }}"
-        mode: "0644"
+        src: '{{ aab_repo_archive_local }}'
+        dest: '{{ aab_repo_archive_remote }}'
+        mode: '0644'
 
     - name: Unpack repository archive
       ansible.builtin.unarchive:
-        src: "{{ aadm_repo_archive_remote }}"
-        dest: "{{ aadm_install_dir }}"
+        src: '{{ aadm_repo_archive_remote }}'
+        dest: '{{ aadm_install_dir }}'
         remote_src: true
-        owner: "{{ aadm_service_user }}"
-        group: "{{ aadm_service_group }}"
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
         extra_opts:
           - --strip-components=1
 
     - name: Unpack ai-agent-browser archive
       ansible.builtin.unarchive:
-        src: "{{ aab_repo_archive_remote }}"
-        dest: "{{ aab_install_dir }}"
+        src: '{{ aab_repo_archive_remote }}'
+        dest: '{{ aab_install_dir }}'
         remote_src: true
-        owner: "{{ aadm_service_user }}"
-        group: "{{ aadm_service_group }}"
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
         extra_opts:
           - --strip-components=1
 
     - name: Install npm dependencies
       ansible.builtin.command:
         cmd: npm install
-        chdir: "{{ aadm_install_dir }}"
-      become_user: "{{ aadm_service_user }}"
+        chdir: '{{ aadm_install_dir }}'
+      become_user: '{{ aadm_service_user }}'
 
     - name: Install ai-agent-browser npm dependencies
       ansible.builtin.command:
         cmd: npm install
-        chdir: "{{ aab_install_dir }}"
-      become_user: "{{ aadm_service_user }}"
+        chdir: '{{ aab_install_dir }}'
+      become_user: '{{ aadm_service_user }}'
 
     - name: Build manager
       ansible.builtin.command:
         cmd: npm run build
-        chdir: "{{ aadm_install_dir }}"
-      become_user: "{{ aadm_service_user }}"
+        chdir: '{{ aadm_install_dir }}'
+      become_user: '{{ aadm_service_user }}'
 
     - name: Build ai-agent-browser
       ansible.builtin.command:
         cmd: npm run build
-        chdir: "{{ aab_install_dir }}"
-      become_user: "{{ aadm_service_user }}"
+        chdir: '{{ aab_install_dir }}'
+      become_user: '{{ aadm_service_user }}'
 
     - name: Install global aadm CLI wrapper
       ansible.builtin.copy:
         dest: /usr/local/bin/aadm
         owner: root
         group: root
-        mode: "0755"
+        mode: '0755'
         content: |
           #!/usr/bin/env bash
           exec /usr/bin/env node /opt/ai-agent-desktop-manager/dist/cli/aadm.js "$@"
@@ -239,7 +239,7 @@
         dest: /usr/local/bin/aab-console
         owner: root
         group: root
-        mode: "0755"
+        mode: '0755'
         content: |
           #!/usr/bin/env bash
           exec /usr/bin/env node /opt/ai-agent-desktop-manager/dist/cli/aab-console.js "$@"
@@ -249,7 +249,7 @@
         dest: /usr/local/bin/ai-agent-browser
         owner: root
         group: root
-        mode: "0755"
+        mode: '0755'
         content: |
           #!/usr/bin/env bash
           exec /usr/bin/env node /opt/ai-agent-browser/dist/index.js "$@"
@@ -259,33 +259,33 @@
         dest: /usr/local/bin/aab
         owner: root
         group: root
-        mode: "0755"
+        mode: '0755'
         content: |
           #!/usr/bin/env bash
           exec /usr/bin/env node /opt/ai-agent-browser/dist/index.js "$@"
 
     - name: Ensure nginx snippet directory exists
       ansible.builtin.file:
-        path: "{{ aadm_nginx_snippet_dir }}"
+        path: '{{ aadm_nginx_snippet_dir }}'
         state: directory
-        owner: "{{ aadm_service_user }}"
-        group: "{{ aadm_service_group }}"
-        mode: "0755"
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0755'
 
     - name: Ensure default nginx site includes desktop snippets
       ansible.builtin.blockinfile:
         path: /etc/nginx/sites-available/default
-        marker: "# {mark} AADM DESKTOP ROUTES"
-        insertafter: "server_name _;"
+        marker: '# {mark} AADM DESKTOP ROUTES'
+        insertafter: 'server_name _;'
         block: |
           include /etc/nginx/conf.d/agent-desktops/*.conf;
 
     - name: Render manager environment
       ansible.builtin.copy:
-        dest: "{{ aadm_install_dir }}/.env"
-        owner: "{{ aadm_service_user }}"
-        group: "{{ aadm_service_group }}"
-        mode: "0640"
+        dest: '{{ aadm_install_dir }}/.env'
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0640'
         content: |
           AADM_HOST=127.0.0.1
           AADM_PORT=8899
@@ -311,27 +311,27 @@
 
     - name: Install sudoers allowlist
       ansible.builtin.copy:
-        src: "{{ aadm_install_dir }}/ops/sudoers-aadm"
+        src: '{{ aadm_install_dir }}/ops/sudoers-aadm'
         dest: /etc/sudoers.d/aadm
         remote_src: true
         owner: root
         group: root
-        mode: "0440"
+        mode: '0440'
 
     - name: Install systemd units
       ansible.builtin.copy:
-        src: "{{ item }}"
-        dest: "/etc/systemd/system/{{ item | basename }}"
+        src: '{{ item }}'
+        dest: '/etc/systemd/system/{{ item | basename }}'
         remote_src: true
         owner: root
         group: root
-        mode: "0644"
+        mode: '0644'
       loop:
-        - "{{ aadm_install_dir }}/systemd/aadm.service"
-        - "{{ aadm_install_dir }}/systemd/vnc@.service"
-        - "{{ aadm_install_dir }}/systemd/websockify@.service"
-        - "{{ aadm_install_dir }}/systemd/chrome@.service"
-        - "{{ aadm_install_dir }}/systemd/aab@.service"
+        - '{{ aadm_install_dir }}/systemd/aadm.service'
+        - '{{ aadm_install_dir }}/systemd/vnc@.service'
+        - '{{ aadm_install_dir }}/systemd/websockify@.service'
+        - '{{ aadm_install_dir }}/systemd/chrome@.service'
+        - '{{ aadm_install_dir }}/systemd/aab@.service'
 
     - name: Ensure nginx is enabled and started
       ansible.builtin.systemd:
@@ -389,7 +389,7 @@
 
     - name: Verify public noVNC route is reachable through nginx
       ansible.builtin.uri:
-        url: "http://127.0.0.1/desktop/{{ aadm_create.json.display }}/"
+        url: 'http://127.0.0.1/desktop/{{ aadm_create.json.display }}/'
         return_content: true
         status_code: 200
       register: aadm_novnc
@@ -397,7 +397,7 @@
 
     - name: Destroy smoke desktop when requested
       ansible.builtin.uri:
-        url: "http://127.0.0.1:8899/v1/desktops/{{ aadm_create.json.id }}"
+        url: 'http://127.0.0.1:8899/v1/desktops/{{ aadm_create.json.id }}'
         method: DELETE
         return_content: true
         status_code: 200
@@ -408,7 +408,7 @@
     - name: Write smoke summary
       ansible.builtin.copy:
         dest: /tmp/aadm-smoke-summary.json
-        mode: "0644"
+        mode: '0644'
         content: |
           {
             "health": {{ aadm_health.json | to_nice_json }},
@@ -421,17 +421,17 @@
     - name: Show aadm CLI usage
       ansible.builtin.debug:
         msg:
-          - "Use the global aadm CLI on the host:"
-          - "  aadm create --owner smoke --label first --ttl 60 --start-url https://example.com"
-          - "  aadm list"
-          - "  aadm doctor --id desk-1"
-          - "  aadm destroy --id desk-1"
-          - "Follow browser console events:"
-          - "  aab-console follow"
-          - "Run JS and keep following:"
+          - 'Use the global aadm CLI on the host:'
+          - '  aadm create --owner smoke --label first --ttl 60 --start-url https://example.com'
+          - '  aadm list'
+          - '  aadm doctor --id desk-1'
+          - '  aadm destroy --id desk-1'
+          - 'Follow browser console events:'
+          - '  aab-console follow'
+          - 'Run JS and keep following:'
           - "  aab-console eval 'console.log(window.location.href)' --follow"
-          - "Capture a screenshot:"
-          - "  aab-console screenshot --out shot.png"
-          - "ai-agent-browser is also available globally:"
-          - "  ai-agent-browser --host 127.0.0.1 --port 8765 --cdp-host 127.0.0.1 --cdp-port 9222"
-          - "  aab --host 127.0.0.1 --port 8765 --cdp-host 127.0.0.1 --cdp-port 9222"
+          - 'Capture a screenshot:'
+          - '  aab-console screenshot --out shot.png'
+          - 'ai-agent-browser is also available globally:'
+          - '  ai-agent-browser --host 127.0.0.1 --port 8765 --cdp-host 127.0.0.1 --cdp-port 9222'
+          - '  aab --host 127.0.0.1 --port 8765 --cdp-host 127.0.0.1 --cdp-port 9222'

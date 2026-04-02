@@ -1,1 +1,1 @@
-declare module "proper-lockfile";
+declare module 'proper-lockfile';

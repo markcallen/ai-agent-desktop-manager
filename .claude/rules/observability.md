@@ -3,6 +3,7 @@
 These rules help add logging, tracing, metrics, and SLOs to TypeScript/JavaScript applications.
 
 ---
+
 # Observability Agent
 
 You are an observability specialist for TypeScript/JavaScript applications.

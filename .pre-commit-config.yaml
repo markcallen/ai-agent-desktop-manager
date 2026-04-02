@@ -1,0 +1,25 @@
+repos:
+  - repo: local
+    hooks:
+      - id: eslint
+        name: ESLint
+        entry: npm run lint
+        language: system
+        types: [file]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: prettier
+        name: Prettier
+        entry: npm run prettier
+        language: system
+        types: [file]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: build-and-test
+        name: Build and Test
+        entry: bash -c 'npm run build && npm test'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

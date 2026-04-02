@@ -5,6 +5,7 @@ These rules are intended for Codex (CLI and app).
 Add standard badges (CI, Release, License, GitHub Release; plus npm for published packages) to the top of README.md.
 
 ---
+
 # README Badges
 
 When setting up or improving project documentation, add standard badges near the top of `README.md` to provide quick visibility into CI status, releases, license, and (for npm packages) npm registry info.

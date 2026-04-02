@@ -1,5 +1,5 @@
-import { config } from "./config.js";
-import type { DesktopRecord } from "./store.js";
+import { config } from './config.js';
+import type { DesktopRecord } from './store.js';
 
 export type Allocation = {
   display: number;
@@ -18,8 +18,10 @@ function range(min: number, max: number) {
 export function allocate(existing: DesktopRecord[]): Allocation {
   const usedDisplays = new Set(existing.map((d) => d.display));
 
-  const display = range(config.displayMin, config.displayMax).find((n) => !usedDisplays.has(n));
-  if (!display) throw new Error("no_free_display");
+  const display = range(config.displayMin, config.displayMax).find(
+    (n) => !usedDisplays.has(n)
+  );
+  if (!display) throw new Error('no_free_display');
 
   const offset = display - config.displayMin;
   const vncPort = 5900 + display;

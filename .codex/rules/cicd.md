@@ -5,6 +5,7 @@ These rules are intended for Codex (CLI and app).
 These rules help design and maintain CI/CD pipelines for TypeScript/JavaScript projects.
 
 ---
+
 # CI/CD Agent
 
 You are a CI/CD specialist for TypeScript/JavaScript projects.

@@ -1,16 +1,16 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import { config } from "./config.js";
-import { execCmd } from "./exec.js";
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { config } from './config.js';
+import { execCmd } from './exec.js';
 
 export function snippetFilename(desktopId: string) {
   return path.join(config.nginxSnippetDir, `${desktopId}.conf`);
 }
 
 export function buildSnippet(display: number, wsPort: number) {
-  const prefix = config.novncPathPrefix.replace(/\/$/, "");
+  const prefix = config.novncPathPrefix.replace(/\/$/, '');
   const loc = `${prefix}/${display}/`;
-  const query = `path=${prefix.replace(/^\//, "")}/${display}/websockify&resize=remote&autoconnect=1`;
+  const query = `path=${prefix.replace(/^\//, '')}/${display}/websockify&resize=remote&autoconnect=1`;
   // Redirect the bare desktop path to noVNC's HTML entrypoint.
   // Trailing slash in proxy_pass avoids path issues with noVNC assets.
   return `location = ${loc} {
@@ -31,7 +31,7 @@ location ${loc} {
 async function atomicWrite(filePath: string, content: string) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp-${Date.now()}`;
-  await fs.writeFile(tmp, content, { encoding: "utf-8", mode: 0o644 });
+  await fs.writeFile(tmp, content, { encoding: 'utf-8', mode: 0o644 });
   await fs.rename(tmp, filePath);
 }
 
@@ -45,17 +45,27 @@ export async function removeSnippet(desktopId: string) {
   const fp = snippetFilename(desktopId);
   try {
     await fs.unlink(fp);
-  } catch (e: any) {
-    if (e?.code !== "ENOENT") throw e;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code !== 'ENOENT') throw e;
   }
 }
 
-export async function nginxTest(): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-  const r = await execCmd(config.nginxBin, ["-t"], { sudo: true });
+export async function nginxTest(): Promise<{
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+}> {
+  const r = await execCmd(config.nginxBin, ['-t'], { sudo: true });
   return { ok: r.code === 0, stdout: r.stdout, stderr: r.stderr };
 }
 
-export async function nginxReload(): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-  const r = await execCmd(config.systemctlBin, ["reload", "nginx"], { sudo: true });
+export async function nginxReload(): Promise<{
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+}> {
+  const r = await execCmd(config.systemctlBin, ['reload', 'nginx'], {
+    sudo: true
+  });
   return { ok: r.code === 0, stdout: r.stdout, stderr: r.stderr };
 }

@@ -1,20 +1,24 @@
 # TODO — ai-agent-desktop-manager
 
 ## MVP hardening
+
 - [ ] Add TTL sweeper that deletes expired desktops every minute
 - [ ] Add per-desktop “idle” tracking using ai-agent-browser heartbeat (optional)
 - [ ] Add structured logging with request ids
 
 ## Nginx routing
+
 - [ ] Support subdomain routing option (wildcard DNS + cert)
 - [ ] Batch Nginx reload when creating multiple desktops
 - [ ] Add optional per-desktop Basic Auth snippet support
 
 ## Orchestration
+
 - [ ] Add “restart desktop” endpoint that restarts all units in order
 - [ ] Add port collision detection via `ss -lnt`
 
 ## Agent skill integration
+
 - [ ] Add MCP server wrapper exposing tools:
   - desktop.create
   - desktop.list
@@ -24,6 +28,7 @@
 - [ ] Add tool docs for Claude/Codex configuration
 
 ## Testing
+
 - [ ] Add end-to-end smoke tests against a real host setup
 - [ ] Provision a dedicated EC2 Linux instance for MVP validation (security group, SSH access, hostname/TLS plan)
 - [ ] Install and configure runtime dependencies on EC2 (`nginx`, `systemd`, VNC stack, `websockify`, Chrome, `ai-agent-browser`)
@@ -36,9 +41,11 @@
 - [ ] Enable HTTPS for the smoke-test noVNC/nginx endpoint, with a clear path for self-signed certs and optional Let's Encrypt
 
 ## Security
+
 - [ ] Optional bearer auth for manager API (env-controlled)
 - [ ] Redaction of secrets in logs (URLs, tokens)
 - [ ] Add “allowed startUrl domains” allowlist option
 
 ## Deployment hardening
+
 - [ ] Verify distro-specific binary paths and unit behavior on production host (`vncserver`, `websockify`, `google-chrome`, `ai-agent-browser`)

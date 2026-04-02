@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_USER="${AADM_SERVICE_USER:-aadm}"
-SERVICE_GROUP="${AADM_SERVICE_GROUP:-aadm}"
-INSTALL_DIR="${AADM_INSTALL_DIR:-/opt/ai-agent-desktop-manager}"
+SERVICE_USER="aadm"
+SERVICE_GROUP="aadm"
+INSTALL_DIR="/opt/ai-agent-desktop-manager"
 
 if [[ ! -f "./package.json" || ! -d "./dist" || ! -d "./systemd" ]]; then
   echo "run this script from the extracted release directory" >&2
+  exit 1
+fi
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "this installer must be run as root (try again with sudo)" >&2
   exit 1
 fi
 
@@ -34,7 +39,7 @@ fi
 install -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" -m 0644 ./ops/sudoers-aadm "${INSTALL_DIR}/ops/sudoers-aadm"
 
 cd "${INSTALL_DIR}"
-npm ci --omit=dev
+runuser -u "${SERVICE_USER}" -- npm ci --omit=dev
 
 cp ./systemd/*.service /etc/systemd/system/
 cp ./ops/sudoers-aadm /etc/sudoers.d/aadm

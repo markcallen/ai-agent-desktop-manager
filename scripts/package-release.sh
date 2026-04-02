@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${1:-}"
 OUTPUT_DIR="${2:-artifacts}"
 ARCH="${3:-linux-x64}"
 
 if [[ -z "${VERSION}" ]]; then
-  VERSION="$(node -p "require('./package.json').version")"
+  VERSION="$(node -p "require('${ROOT_DIR}/package.json').version")"
 fi
 
 if [[ -z "${VERSION}" ]]; then
   echo "version is required" >&2
   exit 1
 fi
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAGE_DIR="$(mktemp -d)"
 PACKAGE_DIR="${STAGE_DIR}/ai-agent-desktop-manager"
 ARTIFACT_BASENAME="ai-agent-desktop-manager-v${VERSION}-${ARCH}"

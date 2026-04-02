@@ -79,7 +79,7 @@ jobs:
       - name: Create and push tag
         run: |
           git tag "v${{ steps.select_version.outputs.version }}"
-          git push origin HEAD
+          git push origin "HEAD:${{ github.ref_name }}"
           git push origin "v${{ steps.select_version.outputs.version }}"
 
   publish_artifact:

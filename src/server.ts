@@ -31,8 +31,7 @@ import {
 } from './util/systemd.js';
 import { CreateDesktopBody } from './api/types.js';
 import { isPortOpen } from './util/net.js';
-
-const VERSION = '0.1.0';
+import { appVersion } from './util/app-version.js';
 
 function desktopId(display: number) {
   return `desk-${display}`;
@@ -235,7 +234,7 @@ export function buildApp() {
   app.get('/health', async () => {
     return {
       ok: true,
-      version: VERSION,
+      version: appVersion,
       uptimeSec: Math.floor(process.uptime())
     };
   });

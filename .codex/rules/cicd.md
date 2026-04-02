@@ -5,6 +5,7 @@ These rules are intended for Codex (CLI and app).
 These rules help design and maintain CI/CD pipelines for TypeScript/JavaScript projects.
 
 ---
+
 # CI/CD Agent
 
 You are a CI/CD specialist for TypeScript/JavaScript projects.
@@ -22,3 +23,147 @@ You are a CI/CD specialist for TypeScript/JavaScript projects.
 - Integration with package registries and deployment targets.
 
 _This agent is a placeholder; full instructions will be expanded in a future release._
+
+## Dependabot
+
+Create a `.github/dependabot.yml` file for the current project. Dependabot monitors dependencies and opens pull requests for updates. Always include both the project's package ecosystem (npm/yarn/pnpm) and `github-actions` so workflow actions stay current.
+
+### Basic Structure
+
+```yaml
+version: 2
+updates:
+  # Project dependencies (npm, yarn, or pnpm - detected from lockfile)
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 10
+
+  # GitHub Actions used in .github/workflows/
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+```
+
+### Node.js Project Groups
+
+For Node.js projects, use `groups` to consolidate related packages into fewer PRs. Group similar items (e.g. AWS SDK, Next.js, Sentry) so updates land together instead of as many separate PRs.
+
+**Common groups:**
+
+| Group       | Patterns                                                       | Rationale                                    |
+| ----------- | -------------------------------------------------------------- | -------------------------------------------- |
+| AWS SDK     | `aws-sdk`, `@aws-sdk/*`                                        | SDK v2 and v3 modular packages               |
+| Next.js     | `next`, `next-*`                                               | Core and plugins                             |
+| Sentry      | `@sentry/*`                                                    | SDK, integrations, build tools               |
+| Testing     | `jest`, `@jest/*`, `vitest`, `@vitest/*`, `@testing-library/*` | Test framework and helpers                   |
+| TypeScript  | `typescript`, `ts-*`, `@types/*`                               | Compiler and type definitions                |
+| Dev tooling | `eslint*`, `prettier`, `@typescript-eslint/*`                  | Linting and formatting                       |
+| Catch-all   | `*`                                                            | All remaining deps in one PR (use sparingly) |
+
+**Example: Grouped Node.js + GitHub Actions config**
+
+```yaml
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 15
+    groups:
+      aws-sdk:
+        patterns:
+          - 'aws-sdk'
+          - '@aws-sdk/*'
+      nextjs:
+        patterns:
+          - 'next'
+          - 'next-*'
+      sentry:
+        patterns:
+          - '@sentry/*'
+      testing:
+        patterns:
+          - 'jest'
+          - '@jest/*'
+          - 'vitest'
+          - '@vitest/*'
+          - '@testing-library/*'
+      typescript:
+        patterns:
+          - 'typescript'
+          - 'ts-*'
+          - '@types/*'
+      dev-tooling:
+        dependency-type: 'development'
+        patterns:
+          - 'eslint*'
+          - 'prettier'
+          - '@typescript-eslint/*'
+      # Remaining production deps grouped to limit PR noise
+      production-dependencies:
+        dependency-type: 'production'
+        patterns:
+          - '*'
+        exclude-patterns:
+          - 'aws-sdk'
+          - '@aws-sdk/*'
+          - 'next'
+          - 'next-*'
+          - '@sentry/*'
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+```
+
+**Notes:**
+
+- Omit groups the project doesn't use (e.g. no `nextjs` or `sentry` if not present).
+- Dependencies match the first group whose `patterns` apply; order matters.
+- Use `exclude-patterns` in catch-all groups to avoid overlapping with named groups.
+- `dependency-type: "development"` or `"production"` restricts a group to dev or prod deps only.
+
+### Monorepos
+
+For monorepos with multiple package directories (e.g. `packages/*`), add an update block per directory:
+
+```yaml
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      # ... groups as above ...
+
+  - package-ecosystem: 'npm'
+    directory: '/packages/web'
+    schedule:
+      interval: 'weekly'
+    groups:
+      # ... groups as above ...
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+```
+
+### Labels and Assignees (Optional)
+
+```yaml
+- package-ecosystem: 'npm'
+  directory: '/'
+  schedule:
+    interval: 'weekly'
+  labels:
+    - 'dependencies'
+  assignees:
+    - 'platform-team'
+```

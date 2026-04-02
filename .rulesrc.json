@@ -1,0 +1,18 @@
+{
+  "targets": ["claude", "codex"],
+  "agents": [
+    "local-dev",
+    "docs",
+    "cicd",
+    "observability",
+    "publishing",
+    "linting",
+    "logging",
+    "testing"
+  ],
+  "ballastVersion": "5.4.2",
+  "languages": ["typescript"],
+  "paths": {
+    "typescript": ["."]
+  }
+}

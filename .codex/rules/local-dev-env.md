@@ -5,6 +5,7 @@ These rules are intended for Codex (CLI and app).
 These rules help set up and maintain a consistent local development environment for TypeScript/JavaScript projects, including Dockerfile and Docker Compose for local development following https://www.markcallen.com/dockerfile-for-typescript/
 
 ---
+
 # Local Development Environment Agent
 
 You are a local development environment specialist for TypeScript/JavaScript projects.
@@ -20,6 +21,49 @@ You are a local development environment specialist for TypeScript/JavaScript pro
 - Local run scripts, env files (.env.example), and optional containerized dev (e.g. Docker Compose for services).
 - Version managers (nvm, volta) and required Node/npm versions.
 - Pre-commit or pre-push hooks that run tests/lint locally before pushing.
+
+---
+
+## Pull Request Workflow
+
+When the user is creating or landing a pull request as part of local development workflow, treat PR hygiene as part of the job.
+
+### Your Responsibilities
+
+1. **Ensure Copilot is assigned to the PR**
+   - When a PR exists or is being created, check whether GitHub Copilot is assigned for code review/agent assistance when the repository workflow expects it.
+   - If Copilot is not assigned, assign it before considering the PR ready.
+   - Do not assume assignment happened automatically; verify it.
+   - For Copilot or any other reviewer, summarize the review comments and requested changes so the user can decide what should be fixed next.
+
+2. **Use a sub-agent to monitor PR checks**
+   - After pushing commits or creating/updating a PR, use a sub-agent to watch the PR checks while the main agent continues with other work.
+   - Have the sub-agent report back when checks succeed or when a check fails.
+   - Treat pending or failing checks as part of the task, not as an afterthought.
+   - Do not tell the user the PR is ready until the sub-agent confirms the required checks are green.
+
+3. **Use `gh` to inspect failures**
+   - If PR checks fail, use the GitHub CLI to inspect the failing runs, jobs, logs, and annotations.
+   - Prefer `gh pr checks`, `gh run view`, and related `gh` commands so the user gets concrete failure context tied to the PR.
+   - Pass the failing details from the sub-agent back to the main agent, then summarize the failing check, the relevant error, and what needs to be fixed next.
+
+4. **Reply directly to GitHub review comments when fixing them**
+   - When a specific GitHub review comment is addressed, reply on that review comment thread directly instead of posting a general summary comment on the PR.
+   - The reply should say what was changed or why the requested change was not made.
+   - Use general PR comments only for overall status or cross-cutting updates, not for resolving line-specific review feedback.
+   - This applies to Copilot review comments and human review comments alike.
+   - Do not stop at making the code change locally; if the review comment was addressed, add the thread reply.
+   - If multiple review comments were addressed, reply on each relevant thread rather than collapsing them into one PR-level summary.
+
+5. **Summarize review asks before changing code**
+   - For Copilot reviews and human reviews alike, summarize the concrete asks, group duplicates, and identify which comments actually require code changes.
+   - If a comment is informational or already satisfied, say that explicitly.
+
+### When to Apply
+
+- When the user asks to create, update, review, or land a PR.
+- When the task includes “open a PR”, “get the PR ready”, “make sure CI passes”, or similar language.
+- When local work is complete and the next step is validating PR readiness.
 
 ---
 
@@ -194,3 +238,56 @@ Use `pnpm run dev` or `npm run dev` in `command` if the project uses that packag
 2. Tell the user how to build and run: `docker compose build`, then `docker compose up --watch` for local development.
 3. Mention that editing files under the watched path will sync and restart the service, and changing `package.json` will trigger a rebuild.
 4. Optionally suggest adding a short "Docker" or "Local development" section to the README with these commands.
+
+## TypeScript Path Aliases (@/)
+
+When working with TypeScript projects, use the `@/` path alias for imports so that paths stay clean and stable regardless of file depth.
+
+### Your Responsibilities
+
+1. **Use `@/` for TypeScript imports**
+   - Prefer `import { foo } from '@/components/foo'` over `import { foo } from '../../../components/foo'`.
+   - The `@/` alias should resolve to the project's source root (typically `src/`).
+
+2. **Configure `tsconfig.json`**
+   - Add `baseUrl` and `paths` so TypeScript resolves `@/*` correctly.
+   - Ensure `baseUrl` points to the project root (or the directory containing `src/`).
+   - Map `@/*` to the source directory (e.g. `src/*`).
+
+3. **Configure the bundler/runtime**
+   - If using `tsc` only: `paths` in `tsconfig.json` is sufficient for type-checking, but the build output may need a resolver (e.g. `tsconfig-paths`) unless the bundler handles it.
+   - If using Vite, Next.js, or similar: they read `tsconfig.json` paths automatically.
+   - If using plain `tsc`: consider `tsconfig-paths` at runtime, or a bundler that resolves paths.
+
+### Example tsconfig.json
+
+```json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src"]
+}
+```
+
+If the project root is the repo root and source lives in `src/`, this maps `@/utils/foo` → `src/utils/foo`.
+
+### Example Imports
+
+```typescript
+// Prefer
+import { formatDate } from '@/utils/date';
+import { Button } from '@/components/Button';
+
+// Avoid deep relative paths
+import { formatDate } from '../../../utils/date';
+```
+
+### When to Apply
+
+- When creating or configuring a new TypeScript project.
+- When a project uses long relative import chains (`../../../`).
+- When `tsconfig.json` exists but has no `paths` or `baseUrl` for `@/`.

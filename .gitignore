@@ -3,3 +3,9 @@ dist
 data
 .env
 .DS_Store
+infra/smoke-test/.terraform/
+infra/smoke-test/.runtime/
+infra/smoke-test/*.tfstate
+infra/smoke-test/*.tfstate.*
+tasks/
+.ballast/

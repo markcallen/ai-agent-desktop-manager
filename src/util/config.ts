@@ -1,5 +1,6 @@
-import { z } from "zod";
-import dotenv from "dotenv";
+import { z } from 'zod';
+import dotenv from 'dotenv';
+import path from 'node:path';
 
 dotenv.config();
 
@@ -12,18 +13,19 @@ const intFromEnv = (key: string, fallback: number) => {
 };
 
 export const Config = z.object({
-  host: z.string().default("127.0.0.1"),
+  host: z.string().default('127.0.0.1'),
   port: z.number().int().default(8899),
 
   authToken: z.string().optional(),
 
-  publicBaseUrl: z.string().url().default("https://host.example.com"),
+  publicBaseUrl: z.string().url().default('https://host.example.com'),
 
-  nginxSnippetDir: z.string().default("/etc/nginx/conf.d/agent-desktops"),
-  nginxBin: z.string().default("/usr/sbin/nginx"),
-  systemctlBin: z.string().default("/bin/systemctl"),
+  nginxSnippetDir: z.string().default('/etc/nginx/conf.d/agent-desktops'),
+  nginxBin: z.string().default('/usr/sbin/nginx'),
+  systemctlBin: z.string().default('/bin/systemctl'),
+  stateDir: z.string().default(path.resolve('data')),
 
-  novncPathPrefix: z.string().default("/desktop"),
+  novncPathPrefix: z.string().default('/desktop'),
 
   displayMin: z.number().int().default(1),
   displayMax: z.number().int().default(50),
@@ -37,40 +39,78 @@ export const Config = z.object({
   aabPortMin: z.number().int().default(8765),
   aabPortMax: z.number().int().default(8849),
 
-  unitVnc: z.string().default("vnc@"),
-  unitWebsockify: z.string().default("websockify@"),
-  unitChrome: z.string().default("chrome@"),
-  unitAab: z.string().default("aab@"),
+  unitVnc: z.string().default('vnc@'),
+  unitWebsockify: z.string().default('websockify@'),
+  unitChrome: z.string().default('chrome@'),
+  unitAab: z.string().default('aab@')
 });
 
 export const config = Config.parse({
-  host: process.env.AADM_HOST ?? "127.0.0.1",
-  port: intFromEnv("AADM_PORT", 8899),
+  host: process.env.AADM_HOST ?? '127.0.0.1',
+  port: intFromEnv('AADM_PORT', 8899),
 
   authToken: process.env.AADM_AUTH_TOKEN || undefined,
 
-  publicBaseUrl: process.env.AADM_PUBLIC_BASE_URL ?? "https://host.example.com",
+  publicBaseUrl: process.env.AADM_PUBLIC_BASE_URL ?? 'https://host.example.com',
 
-  nginxSnippetDir: process.env.AADM_NGINX_SNIPPET_DIR ?? "/etc/nginx/conf.d/agent-desktops",
-  nginxBin: process.env.AADM_NGINX_BIN ?? "/usr/sbin/nginx",
-  systemctlBin: process.env.AADM_SYSTEMCTL_BIN ?? "/bin/systemctl",
+  nginxSnippetDir:
+    process.env.AADM_NGINX_SNIPPET_DIR ?? '/etc/nginx/conf.d/agent-desktops',
+  nginxBin: process.env.AADM_NGINX_BIN ?? '/usr/sbin/nginx',
+  systemctlBin: process.env.AADM_SYSTEMCTL_BIN ?? '/bin/systemctl',
+  stateDir: process.env.AADM_STATE_DIR ?? path.resolve('data'),
 
-  novncPathPrefix: process.env.AADM_NOVNC_PATH_PREFIX ?? "/desktop",
+  novncPathPrefix: process.env.AADM_NOVNC_PATH_PREFIX ?? '/desktop',
 
-  displayMin: intFromEnv("AADM_DISPLAY_MIN", 1),
-  displayMax: intFromEnv("AADM_DISPLAY_MAX", 50),
+  displayMin: intFromEnv('AADM_DISPLAY_MIN', 1),
+  displayMax: intFromEnv('AADM_DISPLAY_MAX', 50),
 
-  wsPortMin: intFromEnv("AADM_WEBSOCKIFY_PORT_MIN", 6081),
-  wsPortMax: intFromEnv("AADM_WEBSOCKIFY_PORT_MAX", 6150),
+  wsPortMin: intFromEnv('AADM_WEBSOCKIFY_PORT_MIN', 6081),
+  wsPortMax: intFromEnv('AADM_WEBSOCKIFY_PORT_MAX', 6150),
 
-  cdpPortMin: intFromEnv("AADM_CDP_PORT_MIN", 9222),
-  cdpPortMax: intFromEnv("AADM_CDP_PORT_MAX", 9299),
+  cdpPortMin: intFromEnv('AADM_CDP_PORT_MIN', 9222),
+  cdpPortMax: intFromEnv('AADM_CDP_PORT_MAX', 9299),
 
-  aabPortMin: intFromEnv("AADM_AAB_PORT_MIN", 8765),
-  aabPortMax: intFromEnv("AADM_AAB_PORT_MAX", 8849),
+  aabPortMin: intFromEnv('AADM_AAB_PORT_MIN', 8765),
+  aabPortMax: intFromEnv('AADM_AAB_PORT_MAX', 8849),
 
-  unitVnc: process.env.AADM_UNIT_VNC ?? "vnc@",
-  unitWebsockify: process.env.AADM_UNIT_WEBSOCKIFY ?? "websockify@",
-  unitChrome: process.env.AADM_UNIT_CHROME ?? "chrome@",
-  unitAab: process.env.AADM_UNIT_AAB ?? "aab@",
+  unitVnc: process.env.AADM_UNIT_VNC ?? 'vnc@',
+  unitWebsockify: process.env.AADM_UNIT_WEBSOCKIFY ?? 'websockify@',
+  unitChrome: process.env.AADM_UNIT_CHROME ?? 'chrome@',
+  unitAab: process.env.AADM_UNIT_AAB ?? 'aab@'
 });
+
+function validateConfig() {
+  const checkRange = (name: string, min: number, max: number) => {
+    if (min > max) {
+      throw new Error(`invalid_config:${name}:min_gt_max (${min} > ${max})`);
+    }
+  };
+
+  checkRange('display', config.displayMin, config.displayMax);
+  checkRange('websockify_port', config.wsPortMin, config.wsPortMax);
+  checkRange('cdp_port', config.cdpPortMin, config.cdpPortMax);
+  checkRange('aab_port', config.aabPortMin, config.aabPortMax);
+
+  const displaySpan = config.displayMax - config.displayMin;
+  const wsNeededMax = config.wsPortMin + displaySpan;
+  const cdpNeededMax = config.cdpPortMin + displaySpan;
+  const aabNeededMax = config.aabPortMin + displaySpan;
+
+  if (wsNeededMax > config.wsPortMax) {
+    throw new Error(
+      `invalid_config:websockify_range_too_small (need max >= ${wsNeededMax}, got ${config.wsPortMax})`
+    );
+  }
+  if (cdpNeededMax > config.cdpPortMax) {
+    throw new Error(
+      `invalid_config:cdp_range_too_small (need max >= ${cdpNeededMax}, got ${config.cdpPortMax})`
+    );
+  }
+  if (aabNeededMax > config.aabPortMax) {
+    throw new Error(
+      `invalid_config:aab_range_too_small (need max >= ${aabNeededMax}, got ${config.aabPortMax})`
+    );
+  }
+}
+
+validateConfig();

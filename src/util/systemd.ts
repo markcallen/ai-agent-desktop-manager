@@ -1,16 +1,38 @@
-import { config } from "./config.js";
-import { execCmd } from "./exec.js";
+import { config } from './config.js';
+import { execCmd } from './exec.js';
+
+function throwOnFailure(
+  op: string,
+  unit: string,
+  code: number,
+  stderr: string,
+  stdout: string
+) {
+  if (code === 0) return;
+  const details = (stderr || stdout || '').trim();
+  throw new Error(`${op}_failed:${unit}: ${details || `exit_code_${code}`}`);
+}
 
 export async function systemctlStart(unit: string) {
-  return await execCmd(config.systemctlBin, ["start", unit], { sudo: true });
+  const res = await execCmd(config.systemctlBin, ['start', unit], {
+    sudo: true
+  });
+  throwOnFailure('systemctl_start', unit, res.code, res.stderr, res.stdout);
+  return res;
 }
 
 export async function systemctlStop(unit: string) {
-  return await execCmd(config.systemctlBin, ["stop", unit], { sudo: true });
+  const res = await execCmd(config.systemctlBin, ['stop', unit], {
+    sudo: true
+  });
+  throwOnFailure('systemctl_stop', unit, res.code, res.stderr, res.stdout);
+  return res;
 }
 
 export async function systemctlIsActive(unit: string) {
-  return await execCmd(config.systemctlBin, ["is-active", unit], { sudo: true });
+  return await execCmd(config.systemctlBin, ['is-active', unit], {
+    sudo: true
+  });
 }
 
 export function unitName(prefix: string, id: number) {

@@ -20,6 +20,8 @@ DESTROY_DESKTOP="false"
 SPOT_MAX_PRICE=""
 AAB_NPM_PACKAGE="ai-agent-browser"
 ACTION="run"
+WEB_INGRESS_CIDR=""
+PUBLIC_WEB_INGRESS="false"
 
 usage() {
   cat <<EOF
@@ -31,6 +33,8 @@ Options:
   --name-prefix <prefix>       Name prefix for AWS resources (default: $NAME_PREFIX)
   --spot-max-price <price>     Optional spot max price
   --aab-npm-package <package>  npm package used for ai-agent-browser (default: $AAB_NPM_PACKAGE)
+  --web-ingress-cidr <cidr>    CIDR allowed to reach HTTP/HTTPS (default: your current IP)
+  --public-web-ingress         Allow HTTP/HTTPS from 0.0.0.0/0
   --destroy-desktop            Destroy the test desktop after verification
   --destroy-on-success         Destroy the instance and AWS resources after a successful run
   -h, --help                   Show this help
@@ -118,6 +122,14 @@ parse_args() {
         AAB_NPM_PACKAGE="$2"
         shift 2
         ;;
+      --web-ingress-cidr)
+        WEB_INGRESS_CIDR="$2"
+        shift 2
+        ;;
+      --public-web-ingress)
+        PUBLIC_WEB_INGRESS="true"
+        shift
+        ;;
       --destroy-desktop)
         DESTROY_DESKTOP="true"
         shift
@@ -152,6 +164,18 @@ generate_key() {
 }
 
 package_repo() {
+  if [[ ! -d "$AI_AGENT_BROWSER_DIR" ]]; then
+    cat >&2 <<EOF
+Expected sibling ai-agent-browser checkout at:
+
+  $AI_AGENT_BROWSER_DIR
+
+The smoke-test playbook packages that repo and installs it on the EC2 host.
+Clone it alongside this repo or update scripts/ec2-smoke-test.sh to use a different source.
+EOF
+    exit 1
+  fi
+
   tar \
     --exclude="./.git" \
     --exclude="./node_modules" \
@@ -177,13 +201,25 @@ public_ip_cidr() {
 }
 
 terraform_base_args() {
+  local ssh_cidr
+  local web_cidr
+  ssh_cidr="$(public_ip_cidr)"
+  web_cidr="$WEB_INGRESS_CIDR"
+  if [[ -z "$web_cidr" ]]; then
+    web_cidr="$ssh_cidr"
+  fi
+  if [[ "$PUBLIC_WEB_INGRESS" == "true" ]]; then
+    web_cidr="0.0.0.0/0"
+  fi
+
   local args=(
     -chdir="$TF_DIR"
     -var "aws_region=$AWS_REGION"
     -var "instance_type=$INSTANCE_TYPE"
     -var "name_prefix=$NAME_PREFIX"
     -var "public_key=$(cat "$KEY_PATH.pub")"
-    -var "ssh_ingress_cidr=$(public_ip_cidr)"
+    -var "ssh_ingress_cidr=$ssh_cidr"
+    -var "web_ingress_cidr=$web_cidr"
   )
 
   if [[ -n "$SPOT_MAX_PRICE" ]]; then

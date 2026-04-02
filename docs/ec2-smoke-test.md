@@ -8,7 +8,7 @@ This repo now includes a local Terraform + Ansible workflow for a disposable AWS
 - Looks up the default VPC and one default subnet
 - Creates a security group:
   - `22/tcp` from your current IP only
-  - `80/tcp` and `443/tcp` from anywhere
+  - `80/tcp` and `443/tcp` from your current IP by default
 - Generates a local SSH key pair outside git
 - Launches an Ubuntu 24.04 `t3.large` spot instance
 - Provisions the host with Ansible
@@ -42,6 +42,8 @@ Optional flags:
 ./scripts/ec2-smoke-test.sh run --region us-west-2 --destroy-desktop
 ./scripts/ec2-smoke-test.sh run --region us-west-2 --spot-max-price 0.20
 ./scripts/ec2-smoke-test.sh run --region us-west-2 --aab-npm-package ai-agent-browser
+./scripts/ec2-smoke-test.sh run --region us-west-2 --public-web-ingress
+./scripts/ec2-smoke-test.sh run --region us-west-2 --web-ingress-cidr 203.0.113.10/32
 ```
 
 ## Access the server
@@ -87,7 +89,7 @@ Destroy it:
 aadm destroy --id desk-1
 ```
 
-It also installs `ai-agent-browser` globally from the sibling `../ai-agent-browser` repo:
+It also installs `ai-agent-browser` globally from the sibling `../ai-agent-browser` repo. The wrapper now checks for that checkout up front and fails with a clear message if it is missing:
 
 ```bash
 ai-agent-browser --host 127.0.0.1 --port 8765 --cdp-host 127.0.0.1 --cdp-port 9222
@@ -122,6 +124,7 @@ Destroy the stack later with:
 
 ## Notes
 
-- The current Ansible flow assumes `ai-agent-browser` is installable via `npm install -g ai-agent-browser`. If your package source differs, pass `--aab-npm-package`.
+- The current Ansible flow still packages the sibling `../ai-agent-browser` checkout onto the host. `--aab-npm-package` controls the package name used inside that deployment flow.
 - The wrapper leaves the instance running by default for manual inspection.
-- `443/tcp` is allowed by the security group, but the smoke setup only configures plain HTTP by default. Add DNS/TLS separately if you need HTTPS on the host itself.
+- `80/tcp` and `443/tcp` now default to your current public IP. Use `--public-web-ingress` only when broader exposure is intentional.
+- `443/tcp` may be open in the security group, but the smoke setup only configures plain HTTP by default. Add DNS/TLS separately if you need HTTPS on the host itself.

@@ -27,6 +27,11 @@ variable "ssh_ingress_cidr" {
   type        = string
 }
 
+variable "web_ingress_cidr" {
+  description = "CIDR allowed to reach the smoke test host over HTTP/HTTPS."
+  type        = string
+}
+
 variable "public_key" {
   description = "SSH public key material for the temporary EC2 key pair."
   type        = string

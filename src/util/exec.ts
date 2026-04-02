@@ -22,6 +22,13 @@ async function defaultExecRunner(
     let stderr = '';
     p.stdout.on('data', (d) => (stdout += String(d)));
     p.stderr.on('data', (d) => (stderr += String(d)));
+    p.on('error', (err) =>
+      resolve({
+        code: 1,
+        stdout,
+        stderr: stderr || err.message
+      })
+    );
     p.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
   });
 }

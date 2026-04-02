@@ -46,6 +46,11 @@
 - [ ] Redaction of secrets in logs (URLs, tokens)
 - [ ] Add “allowed startUrl domains” allowlist option
 
+## Web auth
+
+- [ ] Add JWT token based auth for the webapp/noVNC entrypoint so VNC sessions are protected behind signed, expiring access tokens
+- [ ] Define token issuance, validation, expiry, and revocation behavior for desktop session URLs
+
 ## Deployment hardening
 
 - [ ] Verify distro-specific binary paths and unit behavior on production host (`vncserver`, `websockify`, `google-chrome`, `ai-agent-browser`)

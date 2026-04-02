@@ -20,10 +20,17 @@ export type DesktopRecord = {
   startUrl?: string;
 };
 
-type State = { desktops: DesktopRecord[] };
+export type State = { desktops: DesktopRecord[] };
 
 const stateDir = path.resolve(config.stateDir);
 const statePath = path.join(stateDir, 'state.json');
+
+type SaveStateHook = (
+  state: State,
+  next: (state: State) => Promise<void>
+) => Promise<void>;
+
+let saveStateHook: SaveStateHook | undefined;
 
 async function ensure() {
   await fs.mkdir(stateDir, { recursive: true });
@@ -42,11 +49,18 @@ export async function loadState(): Promise<State> {
   }
 }
 
-export async function saveState(state: State) {
+async function writeState(state: State) {
   await ensure();
   const tmp = path.join(stateDir, `.state.${process.pid}.${Date.now()}.tmp`);
   await fs.writeFile(tmp, JSON.stringify(state, null, 2), 'utf-8');
   await fs.rename(tmp, statePath);
+}
+
+export async function saveState(state: State) {
+  if (saveStateHook) {
+    return await saveStateHook(state, writeState);
+  }
+  await writeState(state);
 }
 
 export function nowMs() {
@@ -59,4 +73,8 @@ export function getStateDir() {
 
 export function getStatePath() {
   return statePath;
+}
+
+export function setSaveStateHook(hook?: SaveStateHook) {
+  saveStateHook = hook;
 }

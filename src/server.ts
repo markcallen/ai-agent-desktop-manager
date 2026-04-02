@@ -9,6 +9,7 @@ import { authHook } from './util/auth.js';
 import {
   loadState,
   saveState,
+  type State,
   type DesktopRecord,
   nowMs,
   getStateDir
@@ -126,6 +127,107 @@ async function stopUnits(
   return { uVnc, uWs, uChrome, uAab, errors };
 }
 
+async function removeSnippetAndReload(
+  id: string,
+  log: { warn: (obj: unknown, msg: string) => void }
+) {
+  const issues: string[] = [];
+  try {
+    await removeSnippet(id);
+    const testRes = await nginxTest();
+    if (!testRes.ok) {
+      issues.push(
+        `nginx test failed during rollback: ${testRes.stderr || testRes.stdout}`
+      );
+      return issues;
+    }
+
+    const reloadRes = await nginxReload();
+    if (!reloadRes.ok) {
+      issues.push(
+        `nginx reload failed during rollback: ${reloadRes.stderr || reloadRes.stdout}`
+      );
+    }
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
+    issues.push(`snippet rollback failed: ${msg}`);
+    log.warn({ err: e, desktopId: id }, 'failed to rollback nginx snippet');
+  }
+  return issues;
+}
+
+async function restoreSnippetAndReload(
+  desktop: Pick<DesktopRecord, 'id' | 'display' | 'wsPort'>,
+  log: { warn: (obj: unknown, msg: string) => void }
+) {
+  const issues: string[] = [];
+  try {
+    await writeSnippet(
+      desktop.id,
+      buildSnippet(desktop.display, desktop.wsPort)
+    );
+    const testRes = await nginxTest();
+    if (!testRes.ok) {
+      issues.push(
+        `nginx test failed during restore: ${testRes.stderr || testRes.stdout}`
+      );
+      return issues;
+    }
+
+    const reloadRes = await nginxReload();
+    if (!reloadRes.ok) {
+      issues.push(
+        `nginx reload failed during restore: ${reloadRes.stderr || reloadRes.stdout}`
+      );
+    }
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
+    issues.push(`snippet restore failed: ${msg}`);
+    log.warn(
+      { err: e, desktopId: desktop.id },
+      'failed to restore nginx snippet'
+    );
+  }
+  return issues;
+}
+
+async function rollbackCreatedDesktop(
+  desktop: Pick<DesktopRecord, 'id' | 'display'>,
+  snippetWritten: boolean,
+  log: { warn: (obj: unknown, msg: string) => void }
+) {
+  const issues: string[] = [];
+  if (snippetWritten) {
+    issues.push(...(await removeSnippetAndReload(desktop.id, log)));
+  }
+
+  const stopRes = await stopUnits(desktop.display, log);
+  issues.push(
+    ...stopRes.errors.map((err) => `stop failed during rollback: ${err}`)
+  );
+  return issues;
+}
+
+async function restoreDestroyedDesktop(
+  desktop: DesktopRecord,
+  log: { warn: (obj: unknown, msg: string) => void }
+) {
+  const issues: string[] = [];
+  try {
+    await startUnits(desktop.display, log);
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
+    issues.push(`unit restore failed: ${msg}`);
+    log.warn(
+      { err: e, desktopId: desktop.id },
+      'failed to restore desktop units'
+    );
+  }
+
+  issues.push(...(await restoreSnippetAndReload(desktop, log)));
+  return issues;
+}
+
 export function buildApp() {
   const app = Fastify({ logger: true });
   app.addHook('preHandler', authHook);
@@ -238,8 +340,24 @@ export function buildApp() {
         });
       }
 
-      st.desktops.push(record);
-      await saveState(st);
+      const nextState: State = {
+        desktops: [...st.desktops, record]
+      };
+      try {
+        await saveState(nextState);
+      } catch (e) {
+        const cleanupIssues = await rollbackCreatedDesktop(
+          record,
+          snippetWritten,
+          app.log
+        );
+        return reply.code(500).send({
+          ok: false,
+          error: 'state_persist_failed',
+          details: String((e as Error)?.message ?? e),
+          cleanupIssues
+        });
+      }
 
       return {
         id: record.id,
@@ -280,8 +398,24 @@ export function buildApp() {
         app.log.warn({ err: e }, 'nginx cleanup failed');
       }
 
-      st.desktops.splice(idx, 1);
-      await saveState(st);
+      const nextState: State = {
+        desktops: st.desktops.filter((_, desktopIndex) => desktopIndex !== idx)
+      };
+      try {
+        await saveState(nextState);
+      } catch (e) {
+        const restoreIssues = await restoreDestroyedDesktop(d, app.log);
+        return reply.code(500).send({
+          ok: false,
+          error: 'state_persist_failed',
+          details: String((e as Error)?.message ?? e),
+          warnings: {
+            stopErrors: stopRes.errors,
+            nginxIssue,
+            restoreIssues
+          }
+        });
+      }
 
       return {
         ok: true,

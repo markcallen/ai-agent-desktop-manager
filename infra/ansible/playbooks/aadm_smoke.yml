@@ -17,8 +17,6 @@
     aadm_auth_token: ''
     aadm_npm_global_bin: /usr/local/bin
     aadm_npm_package: ai-agent-browser
-    aadm_node_bin: /usr/bin/node
-    aadm_npm_bin: /usr/bin/npm
     aadm_smoke_create_desktop: true
     aadm_smoke_destroy_desktop: false
   tasks:
@@ -88,6 +86,34 @@
       ansible.builtin.apt:
         name: nodejs
         update_cache: true
+
+    - name: Install npm
+      ansible.builtin.apt:
+        name: npm
+        update_cache: true
+
+    - name: Detect node binary path
+      ansible.builtin.shell: |
+        set -euo pipefail
+        command -v node
+      args:
+        executable: /bin/bash
+      register: aadm_node_path
+      changed_when: false
+
+    - name: Detect npm binary path
+      ansible.builtin.shell: |
+        set -euo pipefail
+        command -v npm
+      args:
+        executable: /bin/bash
+      register: aadm_npm_path
+      changed_when: false
+
+    - name: Record node and npm binary paths
+      ansible.builtin.set_fact:
+        aadm_node_bin: '{{ aadm_node_path.stdout }}'
+        aadm_npm_bin: '{{ aadm_npm_path.stdout }}'
 
     - name: Install Google Chrome signing key
       ansible.builtin.get_url:

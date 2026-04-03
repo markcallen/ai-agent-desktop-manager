@@ -2,7 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.js';
 import { execCmd } from './exec.js';
-import type { DesktopRouteAuth } from './route-auth.js';
+import {
+  normalizeAuthRequestUrl,
+  normalizeForwardedHeaderName,
+  type DesktopRouteAuth
+} from './route-auth.js';
 
 export function snippetFilename(desktopId: string) {
   return path.join(config.nginxSnippetDir, `${desktopId}.conf`);
@@ -20,7 +24,14 @@ function buildAuthRequestBlock(
   desktopId: string,
   routeAuth: Extract<DesktopRouteAuth, { mode: 'auth_request' }>
 ) {
+  const normalizedUrl = normalizeAuthRequestUrl(routeAuth.authRequest.url);
+  if (!normalizedUrl) {
+    throw new Error('invalid_route_auth:auth_request_url');
+  }
+
   const forwardedHeaders = routeAuth.authRequest.forwardedHeaders
+    .map((headerName) => normalizeForwardedHeaderName(headerName))
+    .filter((headerName): headerName is string => Boolean(headerName))
     .map(
       (headerName) =>
         `  proxy_set_header ${headerName} ${headerNameToNginxVariable(headerName)};`
@@ -29,7 +40,7 @@ function buildAuthRequestBlock(
 
   return `location = ${authRequestLocation(desktopId)} {
   internal;
-  proxy_pass ${routeAuth.authRequest.url};
+  proxy_pass ${normalizedUrl};
   proxy_pass_request_body off;
   proxy_set_header Content-Length "";
   proxy_set_header X-Original-URI $request_uri;

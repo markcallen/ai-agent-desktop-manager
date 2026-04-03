@@ -26,20 +26,60 @@ export type RouteAuthConfig = {
   desktopRouteAuthRequestHeaders: string[];
 };
 
+const SAFE_HEADER_NAME = /^[A-Za-z0-9-]+$/;
+
+function hasUnsafeNginxDirectiveChars(value: string) {
+  for (const char of value) {
+    if (/\s/.test(char) || char === ';' || char === '{' || char === '}') {
+      return true;
+    }
+
+    const code = char.charCodeAt(0);
+    if (code <= 0x1f || code === 0x7f) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function uniqueStrings(values: string[]) {
   return [...new Set(values)];
+}
+
+export function normalizeForwardedHeaderName(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || !SAFE_HEADER_NAME.test(normalized)) return undefined;
+  return normalized;
+}
+
+export function sanitizeForwardedHeaderNames(values: string[]) {
+  return uniqueStrings(
+    values
+      .map((value) => normalizeForwardedHeaderName(value))
+      .filter((value): value is string => Boolean(value))
+  );
 }
 
 export function parseForwardedHeaderNames(raw: string | undefined) {
   if (!raw) return [];
 
-  return uniqueStrings(
-    raw
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-      .map((value) => value.toLowerCase())
-  );
+  return sanitizeForwardedHeaderNames(raw.split(','));
+}
+
+export function normalizeAuthRequestUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || hasUnsafeNginxDirectiveChars(trimmed)) return undefined;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return undefined;
+    }
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 export function normalizeDesktopRouteAuth(
@@ -64,12 +104,14 @@ export function normalizeDesktopRouteAuth(
             typeof header === 'string' && header.length > 0
         )
       : [];
+    const normalizedUrl = normalizeAuthRequestUrl(url);
+    if (!normalizedUrl) return undefined;
 
     return {
       mode: 'auth_request',
       authRequest: {
-        url,
-        forwardedHeaders: uniqueStrings(forwardedHeaders)
+        url: normalizedUrl,
+        forwardedHeaders: sanitizeForwardedHeaderNames(forwardedHeaders)
       }
     };
   }
@@ -85,15 +127,20 @@ export function defaultDesktopRouteAuth(
   routeAuthConfig: RouteAuthConfig
 ): DesktopRouteAuth {
   if (routeAuthConfig.desktopRouteAuthMode === 'auth_request') {
-    if (!routeAuthConfig.desktopRouteAuthRequestUrl) {
+    const normalizedUrl = routeAuthConfig.desktopRouteAuthRequestUrl
+      ? normalizeAuthRequestUrl(routeAuthConfig.desktopRouteAuthRequestUrl)
+      : undefined;
+    if (!normalizedUrl) {
       throw new Error('invalid_config:desktop_route_auth_request_url_required');
     }
 
     return {
       mode: 'auth_request',
       authRequest: {
-        url: routeAuthConfig.desktopRouteAuthRequestUrl,
-        forwardedHeaders: routeAuthConfig.desktopRouteAuthRequestHeaders
+        url: normalizedUrl,
+        forwardedHeaders: sanitizeForwardedHeaderNames(
+          routeAuthConfig.desktopRouteAuthRequestHeaders
+        )
       }
     };
   }
@@ -113,15 +160,20 @@ export function resolveDesktopRouteAuth(
     return { mode: 'none' };
   }
 
-  if (!routeAuthConfig.desktopRouteAuthRequestUrl) {
+  const normalizedUrl = routeAuthConfig.desktopRouteAuthRequestUrl
+    ? normalizeAuthRequestUrl(routeAuthConfig.desktopRouteAuthRequestUrl)
+    : undefined;
+  if (!normalizedUrl) {
     throw new Error('invalid_config:desktop_route_auth_request_url_required');
   }
 
   return {
     mode: 'auth_request',
     authRequest: {
-      url: routeAuthConfig.desktopRouteAuthRequestUrl,
-      forwardedHeaders: routeAuthConfig.desktopRouteAuthRequestHeaders
+      url: normalizedUrl,
+      forwardedHeaders: sanitizeForwardedHeaderNames(
+        routeAuthConfig.desktopRouteAuthRequestHeaders
+      )
     }
   };
 }

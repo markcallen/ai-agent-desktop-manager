@@ -56,9 +56,12 @@ export function normalizeDesktopRouteAuth(
     const url = candidate.authRequest?.url;
     if (typeof url !== 'string' || !url) return undefined;
 
-    const forwardedHeaders = Array.isArray(candidate.authRequest?.forwardedHeaders)
+    const forwardedHeaders = Array.isArray(
+      candidate.authRequest?.forwardedHeaders
+    )
       ? candidate.authRequest.forwardedHeaders.filter(
-          (header): header is string => typeof header === 'string' && header.length > 0
+          (header): header is string =>
+            typeof header === 'string' && header.length > 0
         )
       : [];
 
@@ -83,9 +86,7 @@ export function defaultDesktopRouteAuth(
 ): DesktopRouteAuth {
   if (routeAuthConfig.desktopRouteAuthMode === 'auth_request') {
     if (!routeAuthConfig.desktopRouteAuthRequestUrl) {
-      throw new Error(
-        'invalid_config:desktop_route_auth_request_url_required'
-      );
+      throw new Error('invalid_config:desktop_route_auth_request_url_required');
     }
 
     return {

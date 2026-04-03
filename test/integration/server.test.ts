@@ -25,8 +25,7 @@ async function importServerWithEnv() {
   const netMod = await import('../../src/util/net.ts');
   configMod.config.authToken = 'test-token';
   configMod.config.desktopRouteAuthMode = 'none';
-  configMod.config.desktopRouteAuthRequestUrl =
-    'http://127.0.0.1:3001/verify';
+  configMod.config.desktopRouteAuthRequestUrl = 'http://127.0.0.1:3001/verify';
   configMod.config.desktopRouteAuthRequestHeaders = [
     'x-auth-request-user',
     'x-orchestrator-token'
@@ -255,7 +254,11 @@ test(
       'failed create should not add a desktop record'
     );
 
-    const snippetPath = path.join(tmpRoot, 'nginx', `desk-${failedDisplay}.conf`);
+    const snippetPath = path.join(
+      tmpRoot,
+      'nginx',
+      `desk-${failedDisplay}.conf`
+    );
     await assert.rejects(fs.access(snippetPath));
 
     const stopCalls = calls.filter(
@@ -304,7 +307,11 @@ test(
       'state save failure should not add a partial desktop record'
     );
 
-    const snippetPath = path.join(tmpRoot, 'nginx', `desk-${failedDisplay}.conf`);
+    const snippetPath = path.join(
+      tmpRoot,
+      'nginx',
+      `desk-${failedDisplay}.conf`
+    );
     await assert.rejects(fs.access(snippetPath));
 
     const stopCalls = calls.filter(

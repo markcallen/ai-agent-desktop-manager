@@ -57,8 +57,7 @@ export const config = Config.parse({
   port: intFromEnv('AADM_PORT', 8899),
 
   authToken: process.env.AADM_AUTH_TOKEN || undefined,
-  desktopRouteAuthMode:
-    process.env.AADM_DESKTOP_ROUTE_AUTH_MODE ?? 'none',
+  desktopRouteAuthMode: process.env.AADM_DESKTOP_ROUTE_AUTH_MODE ?? 'none',
   desktopRouteAuthRequestUrl:
     process.env.AADM_DESKTOP_ROUTE_AUTH_REQUEST_URL || undefined,
   desktopRouteAuthRequestHeaders: parseForwardedHeaderNames(
@@ -130,9 +129,7 @@ function validateConfig() {
     config.desktopRouteAuthMode === 'auth_request' &&
     !config.desktopRouteAuthRequestUrl
   ) {
-    throw new Error(
-      'invalid_config:desktop_route_auth_request_url_required'
-    );
+    throw new Error('invalid_config:desktop_route_auth_request_url_required');
   }
 }
 

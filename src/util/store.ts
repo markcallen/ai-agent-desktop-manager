@@ -56,8 +56,9 @@ export async function loadState(): Promise<State> {
         (desktop): DesktopRecord =>
           ({
             ...(desktop as DesktopRecord),
-            routeAuth:
-              normalizeDesktopRouteAuth(desktop.routeAuth) ?? { mode: 'none' }
+            routeAuth: normalizeDesktopRouteAuth(desktop.routeAuth) ?? {
+              mode: 'none'
+            }
           }) as DesktopRecord
       )
     };

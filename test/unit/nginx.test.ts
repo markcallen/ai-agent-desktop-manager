@@ -32,11 +32,17 @@ test('buildSnippet can protect a route with auth_request', () => {
   assert.match(snippet, /internal;/);
   assert.match(snippet, /proxy_pass http:\/\/127\.0\.0\.1:3001\/verify;/);
   assert.match(snippet, /proxy_set_header X-Original-URI \$request_uri;/);
-  assert.match(snippet, /proxy_set_header x-auth-request-user \$http_x_auth_request_user;/);
-  assert.match(snippet, /proxy_set_header x-orchestrator-token \$http_x_orchestrator_token;/);
+  assert.match(
+    snippet,
+    /proxy_set_header x-auth-request-user \$http_x_auth_request_user;/
+  );
+  assert.match(
+    snippet,
+    /proxy_set_header x-orchestrator-token \$http_x_orchestrator_token;/
+  );
   assert.match(snippet, /auth_request \/_aadm\/auth\/desk-3;/);
   assert.match(
     snippet,
-    /location = \/desktop\/3\/ \{\n  auth_request \/_aadm\/auth\/desk-3;\n  proxy_pass http:\/\/127\.0\.0\.1:6083\/vnc\.html\?path=desktop\/3\/websockify&resize=remote&autoconnect=1;/
+    /location = \/desktop\/3\/ \{\n {2}auth_request \/_aadm\/auth\/desk-3;\n {2}proxy_pass http:\/\/127\.0\.0\.1:6083\/vnc\.html\?path=desktop\/3\/websockify&resize=remote&autoconnect=1;/
   );
 });

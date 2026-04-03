@@ -85,6 +85,7 @@
     - name: Install Node.js
       ansible.builtin.apt:
         name: nodejs
+        state: latest
         update_cache: true
 
     - name: Install npm
@@ -114,6 +115,13 @@
       ansible.builtin.set_fact:
         aadm_node_bin: '{{ aadm_node_path.stdout }}'
         aadm_npm_bin: '{{ aadm_npm_path.stdout }}'
+
+    - name: Verify Node 22 is installed
+      ansible.builtin.command:
+        cmd: '{{ aadm_node_bin }} --version'
+      register: aadm_node_version
+      changed_when: false
+      failed_when: not (aadm_node_version.stdout is match("^v22\\."))
 
     - name: Install Google Chrome signing key
       ansible.builtin.get_url:
@@ -406,6 +414,27 @@
         return_content: true
         status_code: 200
       register: aadm_create
+      when: aadm_smoke_create_desktop
+
+    - name: Wait for smoke desktop websockify port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ 6080 + (aadm_create.json.display | int) }}"
+        timeout: 30
+      when: aadm_smoke_create_desktop
+
+    - name: Wait for smoke desktop CDP port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ 9221 + (aadm_create.json.display | int) }}"
+        timeout: 30
+      when: aadm_smoke_create_desktop
+
+    - name: Wait for smoke desktop aab port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ 8764 + (aadm_create.json.display | int) }}"
+        timeout: 30
       when: aadm_smoke_create_desktop
 
     - name: Run doctor on smoke desktop

@@ -2,10 +2,6 @@
 - name: Provision ai-agent-desktop-manager smoke test host
   hosts: all
   become: true
-  roles:
-    - role: geerlingguy.nodejs
-      vars:
-        nodejs_version: '22.x'
   vars:
     aadm_service_user: aadm
     aadm_service_group: aadm
@@ -42,6 +38,12 @@
       args:
         executable: /bin/bash
       changed_when: false
+
+    - name: Install Node.js 22 with geerlingguy.nodejs
+      ansible.builtin.include_role:
+        name: geerlingguy.nodejs
+      vars:
+        nodejs_version: '22.x'
 
     - name: Ensure apt prerequisites are present
       ansible.builtin.apt:

@@ -54,12 +54,27 @@ export function buildSnippet(
       ? `  auth_request ${authRequestLocation(desktopId)};\n`
       : '';
   // Redirect the bare desktop path to noVNC's HTML entrypoint.
-  // Trailing slash in proxy_pass avoids path issues with noVNC assets.
-  return `${routeAuth.mode === 'auth_request' ? buildAuthRequestBlock(desktopId, routeAuth) : ''}location = ${loc} {
-${authLine}  return 302 ${loc}vnc.html?${query};
+  // Protected routes proxy directly to vnc.html so auth_request runs on the entry request.
+  const entryLocation =
+    routeAuth.mode === 'auth_request'
+      ? `location = ${loc} {
+${authLine}  proxy_pass http://127.0.0.1:${wsPort}/vnc.html?${query};
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_read_timeout 7d;
+  proxy_send_timeout 7d;
 }
 
-location ${loc} {
+`
+      : `location = ${loc} {
+  return 302 ${loc}vnc.html?${query};
+}
+
+`;
+
+  // Trailing slash in proxy_pass avoids path issues with noVNC assets.
+  return `${routeAuth.mode === 'auth_request' ? buildAuthRequestBlock(desktopId, routeAuth) : ''}${entryLocation}location ${loc} {
 ${authLine}  proxy_pass http://127.0.0.1:${wsPort}/;
   proxy_http_version 1.1;
   proxy_set_header Upgrade $http_upgrade;

@@ -6,6 +6,7 @@ TF_DIR="$ROOT_DIR/infra/smoke-test"
 ANSIBLE_DIR="$ROOT_DIR/infra/ansible"
 PLAYBOOK="$ANSIBLE_DIR/playbooks/aadm_smoke.yml"
 ANSIBLE_REQUIREMENTS="$ANSIBLE_DIR/requirements.yml"
+ANSIBLE_ROLES_DIR="$ANSIBLE_DIR/roles"
 RUNTIME_DIR="$TF_DIR/.runtime"
 KEY_PATH="$RUNTIME_DIR/id_ed25519"
 ARCHIVE_PATH="$RUNTIME_DIR/repo.tgz"
@@ -283,7 +284,9 @@ run_ansible() {
 
   write_inventory "$host"
 
-  ansible-galaxy role install -r "$ANSIBLE_REQUIREMENTS"
+  mkdir -p "$ANSIBLE_ROLES_DIR"
+  ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
+  ansible-galaxy role install -r "$ANSIBLE_REQUIREMENTS" -p "$ANSIBLE_ROLES_DIR"
 
   ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
   ansible-playbook \

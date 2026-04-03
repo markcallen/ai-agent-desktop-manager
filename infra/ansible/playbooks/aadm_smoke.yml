@@ -395,21 +395,21 @@
     - name: Wait for smoke desktop websockify port
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: "{{ 6080 + (aadm_create.json.display | int) }}"
+        port: '{{ 6080 + (aadm_create.json.display | int) }}'
         timeout: 30
       when: aadm_smoke_create_desktop
 
     - name: Wait for smoke desktop CDP port
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: "{{ 9221 + (aadm_create.json.display | int) }}"
+        port: '{{ 9221 + (aadm_create.json.display | int) }}'
         timeout: 30
       when: aadm_smoke_create_desktop
 
     - name: Wait for smoke desktop aab port
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: "{{ 8764 + (aadm_create.json.display | int) }}"
+        port: '{{ 8764 + (aadm_create.json.display | int) }}'
         timeout: 30
       when: aadm_smoke_create_desktop
 

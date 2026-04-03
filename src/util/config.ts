@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import path from 'node:path';
 import {
   RouteAuthModeSchema,
+  normalizeDesktopRouteTokenTtlSeconds,
   parseForwardedHeaderNames
 } from './route-auth.js';
 
@@ -24,6 +25,8 @@ export const Config = z.object({
   desktopRouteAuthMode: RouteAuthModeSchema.default('none'),
   desktopRouteAuthRequestUrl: z.string().url().optional(),
   desktopRouteAuthRequestHeaders: z.array(z.string()).default([]),
+  desktopRouteTokenSecret: z.string().optional(),
+  desktopRouteTokenTtlSeconds: z.number().int().default(900),
 
   publicBaseUrl: z.string().url().default('https://host.example.com'),
 
@@ -62,6 +65,12 @@ export const config = Config.parse({
     process.env.AADM_DESKTOP_ROUTE_AUTH_REQUEST_URL || undefined,
   desktopRouteAuthRequestHeaders: parseForwardedHeaderNames(
     process.env.AADM_DESKTOP_ROUTE_AUTH_REQUEST_HEADERS
+  ),
+  desktopRouteTokenSecret:
+    process.env.AADM_DESKTOP_ROUTE_TOKEN_SECRET || undefined,
+  desktopRouteTokenTtlSeconds: intFromEnv(
+    'AADM_DESKTOP_ROUTE_TOKEN_TTL_SECONDS',
+    900
   ),
 
   publicBaseUrl: process.env.AADM_PUBLIC_BASE_URL ?? 'https://host.example.com',
@@ -130,6 +139,20 @@ function validateConfig() {
     !config.desktopRouteAuthRequestUrl
   ) {
     throw new Error('invalid_config:desktop_route_auth_request_url_required');
+  }
+
+  if (
+    config.desktopRouteAuthMode === 'token' &&
+    !config.desktopRouteTokenSecret
+  ) {
+    throw new Error('invalid_config:desktop_route_token_secret_required');
+  }
+
+  if (
+    normalizeDesktopRouteTokenTtlSeconds(config.desktopRouteTokenTtlSeconds) ===
+    undefined
+  ) {
+    throw new Error('invalid_config:desktop_route_token_ttl_seconds');
   }
 }
 

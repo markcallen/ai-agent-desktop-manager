@@ -20,6 +20,10 @@ function authRequestLocation(desktopId: string) {
   return `/_aadm/auth/${desktopId}`;
 }
 
+function managerBaseUrl() {
+  return `http://127.0.0.1:${config.port}`;
+}
+
 function buildAuthRequestBlock(
   desktopId: string,
   routeAuth: Extract<DesktopRouteAuth, { mode: 'auth_request' }>
@@ -51,6 +55,34 @@ ${forwardedHeaders ? `${forwardedHeaders}\n` : ''}}
 `;
 }
 
+function buildTokenAuthBlock(desktopId: string) {
+  return `location = ${authRequestLocation(desktopId)} {
+  internal;
+  proxy_pass ${managerBaseUrl()}/_aadm/verify/${desktopId};
+  proxy_pass_request_body off;
+  proxy_set_header Content-Length "";
+  proxy_set_header Cookie $http_cookie;
+  proxy_set_header X-Original-URI $request_uri;
+  proxy_set_header X-Original-Method $request_method;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+`;
+}
+
+function buildTokenAccessLocation(desktopId: string, display: number) {
+  const prefix = config.novncPathPrefix.replace(/\/$/, '');
+  const loc = `${prefix}/${display}`;
+
+  return `location = ${loc}/access {
+  proxy_pass ${managerBaseUrl()}/_aadm/access/${desktopId}$is_args$args;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+`;
+}
+
 export function buildSnippet(
   desktopId: string,
   display: number,
@@ -61,7 +93,7 @@ export function buildSnippet(
   const loc = `${prefix}/${display}/`;
   const query = `path=${prefix.replace(/^\//, '')}/${display}/websockify&resize=remote&autoconnect=1`;
   const authLine =
-    routeAuth.mode === 'auth_request'
+    routeAuth.mode === 'auth_request' || routeAuth.mode === 'token'
       ? `  auth_request ${authRequestLocation(desktopId)};\n`
       : '';
   // Redirect the bare desktop path to noVNC's HTML entrypoint.
@@ -85,7 +117,14 @@ ${authLine}  proxy_pass http://127.0.0.1:${wsPort}/vnc.html?${query};
 `;
 
   // Trailing slash in proxy_pass avoids path issues with noVNC assets.
-  return `${routeAuth.mode === 'auth_request' ? buildAuthRequestBlock(desktopId, routeAuth) : ''}${entryLocation}location ${loc} {
+  const routePrelude =
+    routeAuth.mode === 'auth_request'
+      ? buildAuthRequestBlock(desktopId, routeAuth)
+      : routeAuth.mode === 'token'
+        ? `${buildTokenAuthBlock(desktopId)}${buildTokenAccessLocation(desktopId, display)}`
+        : '';
+
+  return `${routePrelude}${entryLocation}location ${loc} {
 ${authLine}  proxy_pass http://127.0.0.1:${wsPort}/;
   proxy_http_version 1.1;
   proxy_set_header Upgrade $http_upgrade;

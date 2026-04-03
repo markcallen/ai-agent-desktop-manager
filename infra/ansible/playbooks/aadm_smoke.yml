@@ -17,6 +17,10 @@
     aadm_auth_token: ''
     aadm_npm_global_bin: /usr/local/bin
     aadm_npm_package: ai-agent-browser
+    aadm_enable_https: false
+    aadm_tls_domain: ''
+    aadm_tls_email: ''
+    aadm_tls_staging: false
     aadm_smoke_create_desktop: true
     aadm_smoke_destroy_desktop: false
   tasks:
@@ -68,6 +72,14 @@
           - xfonts-base
           - xterm
         update_cache: true
+
+    - name: Ensure certbot prerequisites are present when HTTPS is enabled
+      ansible.builtin.apt:
+        name:
+          - certbot
+          - python3-certbot-nginx
+        update_cache: true
+      when: aadm_enable_https | bool
 
     - name: Detect node binary path
       ansible.builtin.shell: |
@@ -292,6 +304,21 @@
         block: |
           include /etc/nginx/conf.d/agent-desktops/*.conf;
 
+    - name: Validate HTTPS deployment inputs
+      ansible.builtin.assert:
+        that:
+          - aadm_tls_domain | length > 0
+          - aadm_tls_email | length > 0
+        fail_msg: 'aadm_enable_https requires aadm_tls_domain and aadm_tls_email'
+      when: aadm_enable_https | bool
+
+    - name: Set nginx server name for certbot when HTTPS is enabled
+      ansible.builtin.replace:
+        path: /etc/nginx/sites-available/default
+        regexp: '^\s*server_name\s+.*;'
+        replace: '    server_name {{ aadm_tls_domain }};'
+      when: aadm_enable_https | bool
+
     - name: Render manager environment
       ansible.builtin.copy:
         dest: '{{ aadm_install_dir }}/.env'
@@ -302,6 +329,11 @@
           AADM_HOST=127.0.0.1
           AADM_PORT=8899
           AADM_AUTH_TOKEN={{ aadm_auth_token }}
+          AADM_DESKTOP_ROUTE_AUTH_MODE=none
+          AADM_DESKTOP_ROUTE_AUTH_REQUEST_URL=
+          AADM_DESKTOP_ROUTE_AUTH_REQUEST_HEADERS=
+          AADM_DESKTOP_ROUTE_TOKEN_SECRET=
+          AADM_DESKTOP_ROUTE_TOKEN_TTL_SECONDS=900
           AADM_PUBLIC_BASE_URL={{ aadm_public_base_url }}
           AADM_NGINX_SNIPPET_DIR={{ aadm_nginx_snippet_dir }}
           AADM_STATE_DIR={{ aadm_state_dir }}
@@ -350,6 +382,20 @@
         name: nginx
         enabled: true
         state: started
+
+    - name: Reload nginx after updating the TLS domain
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+      when: aadm_enable_https | bool
+
+    - name: Request HTTPS certificate with certbot
+      ansible.builtin.command:
+        cmd: >-
+          certbot --nginx --non-interactive --agree-tos --redirect --email {{ aadm_tls_email }} -d {{ aadm_tls_domain }}{% if aadm_tls_staging | bool %} --staging{% endif %}
+      args:
+        creates: '/etc/letsencrypt/live/{{ aadm_tls_domain }}/fullchain.pem'
+      when: aadm_enable_https | bool
 
     - name: Reload systemd
       ansible.builtin.systemd:
@@ -457,6 +503,8 @@
         msg:
           - 'Use the global aadm CLI on the host:'
           - '  aadm create --owner smoke --label first --ttl 60 --start-url https://example.com'
+          - '  aadm create --owner smoke --label protected --route-auth-mode token'
+          - '  aadm access-url --id desk-1'
           - '  aadm list'
           - '  aadm doctor --id desk-1'
           - '  aadm destroy --id desk-1'

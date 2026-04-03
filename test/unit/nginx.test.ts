@@ -46,3 +46,24 @@ test('buildSnippet can protect a route with auth_request', () => {
     /location = \/desktop\/3\/ \{\n {2}auth_request \/_aadm\/auth\/desk-3;\n {2}proxy_pass http:\/\/127\.0\.0\.1:6083\/vnc\.html\?path=desktop\/3\/websockify&resize=remote&autoconnect=1;/
   );
 });
+
+test('buildSnippet can protect a route with manager token verification', () => {
+  const snippet = buildSnippet('desk-4', 4, 6084, {
+    mode: 'token',
+    token: {
+      ttlSeconds: 900
+    }
+  });
+
+  assert.match(snippet, /location = \/_aadm\/auth\/desk-4/);
+  assert.match(
+    snippet,
+    /proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/verify\/desk-4;/
+  );
+  assert.match(snippet, /proxy_set_header Cookie \$http_cookie;/);
+  assert.match(
+    snippet,
+    /location = \/desktop\/4\/access \{\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/access\/desk-4\$is_args\$args;/
+  );
+  assert.match(snippet, /auth_request \/_aadm\/auth\/desk-4;/);
+});

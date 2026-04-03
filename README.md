@@ -85,7 +85,9 @@ Default:
 
 For localhost-only development, leave route auth disabled.
 
-For externally exposed desktops, enable nginx `auth_request` verification:
+For externally exposed desktops, you have two protected-route modes:
+
+`auth_request` for an external verifier:
 
 ```bash
 AADM_DESKTOP_ROUTE_AUTH_MODE=auth_request
@@ -107,6 +109,17 @@ The manager always forwards:
 - `X-Forwarded-Proto`
 
 It also forwards any request headers listed in `AADM_DESKTOP_ROUTE_AUTH_REQUEST_HEADERS`.
+
+`token` for manager-issued secure access URLs:
+
+```bash
+AADM_DESKTOP_ROUTE_AUTH_MODE=token
+AADM_DESKTOP_ROUTE_TOKEN_SECRET=<long-random-secret>
+AADM_DESKTOP_ROUTE_TOKEN_TTL_SECONDS=900
+AADM_PUBLIC_BASE_URL=https://desktop.example.com
+```
+
+In token mode, the manager mints a short-lived URL that exchanges a one-time token for an HttpOnly cookie, and nginx uses that cookie to protect the desktop route. Keep `AADM_PUBLIC_BASE_URL` on `https://...` when you intend to expose the desktop externally.
 
 ---
 
@@ -148,7 +161,79 @@ location /desktop/3/ {
 
 The manager writes that snippet, runs `nginx -t`, then reloads Nginx.
 
-When route protection is enabled, each desktop snippet also includes an internal auth verifier location plus `auth_request` directives on the desktop locations.
+When route protection is enabled, each desktop snippet also includes an internal auth verifier location plus `auth_request` directives on the desktop locations. Token mode adds a separate access bootstrap location that mints the cookie before redirecting into noVNC.
+
+### Optional HTTPS with certbot
+
+The smoke/deployment helper can request a certificate with certbot and nginx HTTP-01 when you have:
+
+- a public DNS name pointed at the host
+- inbound port 80 and 443 access to the host
+- a valid email address for Let's Encrypt registration
+
+Example:
+
+```bash
+./scripts/ec2-smoke-test.sh run --region us-west-1 --enable-https --tls-domain desktop.example.com --tls-email ops@example.com
+```
+
+That path keeps the default HTTP-only smoke flow unchanged unless you opt in with `--enable-https`.
+
+### Recommended DNS setup for live TLS smoke tests
+
+The cleanest way to run live TLS smoke tests is to delegate a dedicated subdomain such as `smoke.example.com` to Route 53, then create ephemeral hostnames under that zone for each run.
+
+Why this is the recommended shape:
+
+- it avoids giving the smoke workflow direct write access to your primary DNS provider
+- it keeps blast radius low by isolating smoke records under a single delegated zone
+- it fits certbot HTTP-01, which needs a public hostname that resolves directly to the EC2 host on port 80
+
+Recommended flow:
+
+1. Create or reuse a delegated zone such as `smoke.example.com` in Route 53.
+2. Delegate that subdomain from the parent zone.
+3. Create an A record inside the delegated zone for the smoke host, for example `run-20260403.smoke.example.com`.
+4. Run the smoke helper with `--enable-https` and that hostname.
+
+This repo includes a helper to do the Route 53 side:
+
+```bash
+./scripts/route53-smoke-subdomain.sh \
+  --subdomain-zone smoke.example.com \
+  --record-name run-20260403.smoke.example.com \
+  --ip 203.0.113.10
+```
+
+If the parent zone is also hosted in Route 53, the script will upsert the NS delegation automatically. If the parent zone is managed elsewhere, the script prints the exact name servers to add manually.
+
+Cloudflare example:
+
+1. Run the helper once without `--record-name` to create the delegated Route 53 zone and print the Route 53 name servers.
+2. In Cloudflare for the parent zone, add `NS` records for `smoke.example.com` pointing at those Route 53 name servers.
+3. Keep the final smoke hostname DNS-only. Do not proxy it through Cloudflare.
+4. Rerun the helper with `--record-name` and `--ip` to create the smoke hostname in Route 53.
+
+Example end-to-end:
+
+```bash
+./scripts/route53-smoke-subdomain.sh --subdomain-zone smoke.example.com
+./scripts/route53-smoke-subdomain.sh \
+  --subdomain-zone smoke.example.com \
+  --record-name run-20260403.smoke.example.com \
+  --ip 203.0.113.10
+./scripts/ec2-smoke-test.sh run \
+  --region us-west-1 \
+  --enable-https \
+  --tls-domain run-20260403.smoke.example.com \
+  --tls-email ops@example.com
+```
+
+Notes:
+
+- `http-01` requires inbound port 80 and 443 to the smoke host.
+- DNS changes must have propagated before certbot runs.
+- For repeated smoke runs, reuse the delegated zone and only rotate the per-run hostname.
 
 ---
 
@@ -334,6 +419,8 @@ This repo includes a small CLI `aadm`:
 
 ```bash
 npm run cli -- create --owner codex --label work --ttl 90 --start-url https://github.com
+npm run cli -- create --owner codex --label private --route-auth-mode token
+npm run cli -- access-url --id desk-3
 npm run cli -- list
 npm run cli -- destroy --id desk-3
 ```
@@ -406,6 +493,9 @@ See `.env.example` for:
 - port ranges
 - nginx snippet directory
 - auth token
+- desktop route auth mode and verifier settings
+- token route auth secret and TTL
+- HTTPS/certbot smoke deployment variables
 - base URL template for noVNC links
 - state directory
 

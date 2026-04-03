@@ -1,12 +1,14 @@
+import crypto from 'node:crypto';
 import { z } from 'zod';
 
-export const RouteAuthModeSchema = z.enum(['none', 'auth_request']);
+export const RouteAuthModeSchema = z.enum(['none', 'auth_request', 'token']);
 export type RouteAuthMode = z.infer<typeof RouteAuthModeSchema>;
 
 export const RouteAuthRequestModeSchema = z.enum([
   'inherit',
   'none',
-  'auth_request'
+  'auth_request',
+  'token'
 ]);
 export type RouteAuthRequestMode = z.infer<typeof RouteAuthRequestModeSchema>;
 
@@ -18,15 +20,37 @@ export type DesktopRouteAuth =
         url: string;
         forwardedHeaders: string[];
       };
+    }
+  | {
+      mode: 'token';
+      token: {
+        ttlSeconds: number;
+      };
     };
 
 export type RouteAuthConfig = {
   desktopRouteAuthMode: RouteAuthMode;
   desktopRouteAuthRequestUrl?: string;
   desktopRouteAuthRequestHeaders: string[];
+  desktopRouteTokenSecret?: string;
+  desktopRouteTokenTtlSeconds: number;
 };
 
+export const DESKTOP_ACCESS_TOKEN_QUERY_PARAM = 'token';
 const SAFE_HEADER_NAME = /^[A-Za-z0-9-]+$/;
+const SAFE_COOKIE_NAME = /^[A-Za-z0-9_]+$/;
+const MIN_TOKEN_TTL_SECONDS = 1;
+const MAX_TOKEN_TTL_SECONDS = 86_400;
+
+type DesktopAccessTokenPayload = {
+  d: string;
+  e: number;
+};
+
+export type VerifiedDesktopAccessToken = {
+  desktopId: string;
+  expiresAt: number;
+};
 
 function hasUnsafeNginxDirectiveChars(value: string) {
   for (const char of value) {
@@ -45,6 +69,31 @@ function hasUnsafeNginxDirectiveChars(value: string) {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values)];
+}
+
+function base64UrlEncode(value: string) {
+  return Buffer.from(value, 'utf-8').toString('base64url');
+}
+
+function base64UrlDecode(value: string) {
+  return Buffer.from(value, 'base64url').toString('utf-8');
+}
+
+function signDesktopAccessPayload(encodedPayload: string, secret: string) {
+  return crypto
+    .createHmac('sha256', secret)
+    .update(encodedPayload)
+    .digest('base64url');
+}
+
+function parsePositiveInt(
+  value: unknown,
+  min = MIN_TOKEN_TTL_SECONDS,
+  max = MAX_TOKEN_TTL_SECONDS
+) {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return undefined;
+  if (value < min || value > max) return undefined;
+  return value;
 }
 
 export function normalizeForwardedHeaderName(value: string) {
@@ -82,6 +131,66 @@ export function normalizeAuthRequestUrl(value: string) {
   }
 }
 
+export function normalizeDesktopRouteTokenTtlSeconds(value: unknown) {
+  return parsePositiveInt(value);
+}
+
+export function desktopAccessCookieName(desktopId: string) {
+  const normalized = `aadm_desktop_access_${desktopId.replace(/[^A-Za-z0-9_]/g, '_')}`;
+  if (!SAFE_COOKIE_NAME.test(normalized)) {
+    throw new Error('invalid_route_auth:cookie_name');
+  }
+  return normalized;
+}
+
+export function createDesktopAccessToken(
+  desktopId: string,
+  secret: string,
+  ttlSeconds: number,
+  issuedAtMs = Date.now()
+) {
+  const normalizedTtlSeconds = normalizeDesktopRouteTokenTtlSeconds(ttlSeconds);
+  if (!normalizedTtlSeconds) {
+    throw new Error('invalid_route_auth:token_ttl_seconds');
+  }
+
+  const payload: DesktopAccessTokenPayload = {
+    d: desktopId,
+    e: issuedAtMs + normalizedTtlSeconds * 1000
+  };
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signature = signDesktopAccessPayload(encodedPayload, secret);
+  return `${encodedPayload}.${signature}`;
+}
+
+export function verifyDesktopAccessToken(
+  token: string,
+  desktopId: string,
+  secret: string,
+  nowMs = Date.now()
+): VerifiedDesktopAccessToken | undefined {
+  const [encodedPayload, signature] = token.split('.');
+  if (!encodedPayload || !signature) return undefined;
+
+  const expectedSignature = signDesktopAccessPayload(encodedPayload, secret);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  const actualBuffer = Buffer.from(signature);
+  if (expectedBuffer.length !== actualBuffer.length) return undefined;
+  if (!crypto.timingSafeEqual(expectedBuffer, actualBuffer)) return undefined;
+
+  try {
+    const payload = JSON.parse(
+      base64UrlDecode(encodedPayload)
+    ) as DesktopAccessTokenPayload;
+    if (payload.d !== desktopId) return undefined;
+    if (!Number.isInteger(payload.e) || payload.e <= nowMs) return undefined;
+
+    return { desktopId: payload.d, expiresAt: payload.e };
+  } catch {
+    return undefined;
+  }
+}
+
 export function normalizeDesktopRouteAuth(
   value: unknown
 ): DesktopRouteAuth | undefined {
@@ -90,6 +199,7 @@ export function normalizeDesktopRouteAuth(
   const candidate = value as {
     mode?: unknown;
     authRequest?: { url?: unknown; forwardedHeaders?: unknown };
+    token?: { ttlSeconds?: unknown };
   };
 
   if (candidate.mode === 'auth_request') {
@@ -112,6 +222,20 @@ export function normalizeDesktopRouteAuth(
       authRequest: {
         url: normalizedUrl,
         forwardedHeaders: sanitizeForwardedHeaderNames(forwardedHeaders)
+      }
+    };
+  }
+
+  if (candidate.mode === 'token') {
+    const ttlSeconds = normalizeDesktopRouteTokenTtlSeconds(
+      candidate.token?.ttlSeconds
+    );
+    if (!ttlSeconds) return undefined;
+
+    return {
+      mode: 'token',
+      token: {
+        ttlSeconds
       }
     };
   }
@@ -145,6 +269,26 @@ export function defaultDesktopRouteAuth(
     };
   }
 
+  if (routeAuthConfig.desktopRouteAuthMode === 'token') {
+    if (!routeAuthConfig.desktopRouteTokenSecret) {
+      throw new Error('invalid_config:desktop_route_token_secret_required');
+    }
+
+    const ttlSeconds = normalizeDesktopRouteTokenTtlSeconds(
+      routeAuthConfig.desktopRouteTokenTtlSeconds
+    );
+    if (!ttlSeconds) {
+      throw new Error('invalid_config:desktop_route_token_ttl_seconds');
+    }
+
+    return {
+      mode: 'token',
+      token: {
+        ttlSeconds
+      }
+    };
+  }
+
   return { mode: 'none' };
 }
 
@@ -160,20 +304,40 @@ export function resolveDesktopRouteAuth(
     return { mode: 'none' };
   }
 
-  const normalizedUrl = routeAuthConfig.desktopRouteAuthRequestUrl
-    ? normalizeAuthRequestUrl(routeAuthConfig.desktopRouteAuthRequestUrl)
-    : undefined;
-  if (!normalizedUrl) {
-    throw new Error('invalid_config:desktop_route_auth_request_url_required');
+  if (requestedMode === 'auth_request') {
+    const normalizedUrl = routeAuthConfig.desktopRouteAuthRequestUrl
+      ? normalizeAuthRequestUrl(routeAuthConfig.desktopRouteAuthRequestUrl)
+      : undefined;
+    if (!normalizedUrl) {
+      throw new Error('invalid_config:desktop_route_auth_request_url_required');
+    }
+
+    return {
+      mode: 'auth_request',
+      authRequest: {
+        url: normalizedUrl,
+        forwardedHeaders: sanitizeForwardedHeaderNames(
+          routeAuthConfig.desktopRouteAuthRequestHeaders
+        )
+      }
+    };
+  }
+
+  if (!routeAuthConfig.desktopRouteTokenSecret) {
+    throw new Error('invalid_config:desktop_route_token_secret_required');
+  }
+
+  const ttlSeconds = normalizeDesktopRouteTokenTtlSeconds(
+    routeAuthConfig.desktopRouteTokenTtlSeconds
+  );
+  if (!ttlSeconds) {
+    throw new Error('invalid_config:desktop_route_token_ttl_seconds');
   }
 
   return {
-    mode: 'auth_request',
-    authRequest: {
-      url: normalizedUrl,
-      forwardedHeaders: sanitizeForwardedHeaderNames(
-        routeAuthConfig.desktopRouteAuthRequestHeaders
-      )
+    mode: 'token',
+    token: {
+      ttlSeconds
     }
   };
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { argv, exit } from 'node:process';
 
-type Cmd = 'create' | 'list' | 'get' | 'destroy' | 'doctor';
+type Cmd = 'create' | 'list' | 'get' | 'destroy' | 'doctor' | 'access-url';
 
 function arg(name: string) {
   const idx = argv.indexOf(name);
@@ -48,15 +48,39 @@ async function main() {
     const label = arg('--label');
     const ttl = arg('--ttl');
     const startUrl = arg('--start-url');
+    const routeAuthMode = arg('--route-auth-mode');
     const body: Record<string, unknown> = {};
     if (owner) body.owner = owner;
     if (label) body.label = label;
     if (ttl) body.ttlMinutes = Number(ttl);
     if (startUrl) body.startUrl = startUrl;
+    if (routeAuthMode) body.routeAuthMode = routeAuthMode;
 
     console.log(
       JSON.stringify(
         await req('/v1/desktops', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body)
+        }),
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  if (cmd === 'access-url') {
+    const id = arg('--id');
+    const ttlSeconds = arg('--ttl-seconds');
+    if (!id) throw new Error('missing --id');
+
+    const body: Record<string, unknown> = {};
+    if (ttlSeconds) body.ttlSeconds = Number(ttlSeconds);
+
+    console.log(
+      JSON.stringify(
+        await req(`/v1/desktops/${id}/access-url`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body)
@@ -97,7 +121,9 @@ async function main() {
     return;
   }
 
-  console.error('Unknown command. Use: create|list|get|doctor|destroy');
+  console.error(
+    'Unknown command. Use: create|list|get|doctor|destroy|access-url'
+  );
   exit(2);
 }
 

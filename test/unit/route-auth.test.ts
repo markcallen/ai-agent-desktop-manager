@@ -2,9 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  createDesktopAccessToken,
+  defaultDesktopRouteAuth,
   normalizeAuthRequestUrl,
   normalizeDesktopRouteAuth,
-  parseForwardedHeaderNames
+  parseForwardedHeaderNames,
+  verifyDesktopAccessToken
 } from '../../src/util/route-auth.ts';
 
 test('parseForwardedHeaderNames keeps only safe header tokens', () => {
@@ -53,5 +56,59 @@ test('normalizeDesktopRouteAuth rejects unsafe persisted auth config', () => {
         forwardedHeaders: ['x-smoke-auth']
       }
     }
+  );
+});
+
+test('defaultDesktopRouteAuth builds token mode from config', () => {
+  const routeAuth = defaultDesktopRouteAuth({
+    desktopRouteAuthMode: 'token',
+    desktopRouteAuthRequestHeaders: [],
+    desktopRouteTokenSecret: 'test-secret',
+    desktopRouteTokenTtlSeconds: 900
+  });
+
+  assert.deepEqual(routeAuth, {
+    mode: 'token',
+    token: {
+      ttlSeconds: 900
+    }
+  });
+});
+
+test('normalizeDesktopRouteAuth accepts token mode persisted state', () => {
+  assert.deepEqual(
+    normalizeDesktopRouteAuth({
+      mode: 'token',
+      token: {
+        ttlSeconds: 300
+      }
+    }),
+    {
+      mode: 'token',
+      token: {
+        ttlSeconds: 300
+      }
+    }
+  );
+});
+
+test('verifyDesktopAccessToken rejects wrong desktop and expired tokens', () => {
+  const validAt = Date.UTC(2026, 3, 3, 0, 0, 0);
+  const token = createDesktopAccessToken('desk-1', 'test-secret', 300, validAt);
+
+  assert.deepEqual(
+    verifyDesktopAccessToken(token, 'desk-1', 'test-secret', validAt),
+    {
+      desktopId: 'desk-1',
+      expiresAt: validAt + 300_000
+    }
+  );
+  assert.equal(
+    verifyDesktopAccessToken(token, 'desk-2', 'test-secret', validAt),
+    undefined
+  );
+  assert.equal(
+    verifyDesktopAccessToken(token, 'desk-1', 'test-secret', validAt + 301_000),
+    undefined
   );
 });

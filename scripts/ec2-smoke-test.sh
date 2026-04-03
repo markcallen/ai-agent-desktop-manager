@@ -21,6 +21,10 @@ DESTROY_ON_SUCCESS="false"
 DESTROY_DESKTOP="false"
 SPOT_MAX_PRICE=""
 AAB_NPM_PACKAGE="ai-agent-browser"
+ENABLE_HTTPS="false"
+TLS_DOMAIN=""
+TLS_EMAIL=""
+TLS_STAGING="false"
 ACTION="run"
 WEB_INGRESS_CIDR=""
 PUBLIC_WEB_INGRESS="false"
@@ -37,6 +41,10 @@ Options:
   --aab-npm-package <package>  npm package used for ai-agent-browser (default: $AAB_NPM_PACKAGE)
   --web-ingress-cidr <cidr>    CIDR allowed to reach HTTP/HTTPS (default: your current IP)
   --public-web-ingress         Allow HTTP/HTTPS from 0.0.0.0/0
+  --enable-https               Configure certbot + nginx HTTPS with HTTP-01
+  --tls-domain <domain>        Domain name to request a certificate for
+  --tls-email <email>          Email address used for certbot registration
+  --tls-staging                Use the certbot staging endpoint
   --destroy-desktop            Destroy the test desktop after verification
   --destroy-on-success         Destroy the instance and AWS resources after a successful run
   -h, --help                   Show this help
@@ -44,6 +52,7 @@ Options:
 Examples:
   $(basename "$0") run --region us-west-1
   $(basename "$0") run --region us-west-1 --destroy-on-success
+  $(basename "$0") run --region us-west-1 --enable-https --tls-domain smoke.example.com --tls-email ops@example.com
   $(basename "$0") ssh --region us-west-1
   $(basename "$0") destroy --region us-west-1
 EOF
@@ -64,6 +73,23 @@ Missing required --region argument.
 Example:
 
   ./scripts/ec2-smoke-test.sh run --region us-west-1
+EOF
+    exit 1
+  fi
+}
+
+require_https_inputs() {
+  if [[ "$ENABLE_HTTPS" != "true" ]]; then
+    return
+  fi
+
+  if [[ -z "$TLS_DOMAIN" || -z "$TLS_EMAIL" ]]; then
+    cat >&2 <<EOF
+--enable-https requires both --tls-domain and --tls-email.
+
+Example:
+
+  ./scripts/ec2-smoke-test.sh run --region us-west-1 --enable-https --tls-domain smoke.example.com --tls-email ops@example.com
 EOF
     exit 1
   fi
@@ -130,6 +156,22 @@ parse_args() {
         ;;
       --public-web-ingress)
         PUBLIC_WEB_INGRESS="true"
+        shift
+        ;;
+      --enable-https)
+        ENABLE_HTTPS="true"
+        shift
+        ;;
+      --tls-domain)
+        TLS_DOMAIN="$2"
+        shift 2
+        ;;
+      --tls-email)
+        TLS_EMAIL="$2"
+        shift 2
+        ;;
+      --tls-staging)
+        TLS_STAGING="true"
         shift
         ;;
       --destroy-desktop)
@@ -207,6 +249,9 @@ terraform_base_args() {
   local web_cidr
   ssh_cidr="$(public_ip_cidr)"
   web_cidr="$WEB_INGRESS_CIDR"
+  if [[ "$ENABLE_HTTPS" == "true" ]]; then
+    web_cidr="0.0.0.0/0"
+  fi
   if [[ -z "$web_cidr" ]]; then
     web_cidr="$ssh_cidr"
   fi
@@ -282,6 +327,10 @@ run_ansible() {
   local host="$1"
   local public_base_url="http://$host"
 
+  if [[ "$ENABLE_HTTPS" == "true" ]]; then
+    public_base_url="https://$TLS_DOMAIN"
+  fi
+
   write_inventory "$host"
 
   mkdir -p "$ANSIBLE_ROLES_DIR"
@@ -295,12 +344,20 @@ run_ansible() {
     -e "aadm_repo_archive_local=$ARCHIVE_PATH" \
     -e "aab_repo_archive_local=$AI_AGENT_BROWSER_ARCHIVE_PATH" \
     -e "aadm_public_base_url=$public_base_url" \
+    -e "aadm_enable_https=$ENABLE_HTTPS" \
+    -e "aadm_tls_domain=$TLS_DOMAIN" \
+    -e "aadm_tls_email=$TLS_EMAIL" \
+    -e "aadm_tls_staging=$TLS_STAGING" \
     -e "aadm_npm_package=$AAB_NPM_PACKAGE" \
     -e "aadm_smoke_destroy_desktop=$DESTROY_DESKTOP"
 }
 
 print_access() {
   local host="$1"
+  local public_url="http://$host/desktop/1/"
+  if [[ "$ENABLE_HTTPS" == "true" ]]; then
+    public_url="https://$TLS_DOMAIN/desktop/1/"
+  fi
   cat <<EOF
 Smoke test host is ready.
 
@@ -311,7 +368,7 @@ Manager health:
   ssh -i $KEY_PATH ubuntu@$host 'curl -s http://127.0.0.1:8899/health | jq'
 
 noVNC route after a successful smoke create:
-  http://$host/desktop/1/
+  $public_url
 
 Summary file on the instance:
   /tmp/aadm-smoke-summary.json
@@ -330,6 +387,7 @@ run() {
   require_cmd ansible-galaxy
 
   require_region
+  require_https_inputs
   ensure_runtime_dir
   generate_key
   package_repo

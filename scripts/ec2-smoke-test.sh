@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TF_DIR="$ROOT_DIR/infra/smoke-test"
 ANSIBLE_DIR="$ROOT_DIR/infra/ansible"
 PLAYBOOK="$ANSIBLE_DIR/playbooks/aadm_smoke.yml"
+ANSIBLE_REQUIREMENTS="$ANSIBLE_DIR/requirements.yml"
+ANSIBLE_ROLES_DIR="$ANSIBLE_DIR/roles"
 RUNTIME_DIR="$TF_DIR/.runtime"
 KEY_PATH="$RUNTIME_DIR/id_ed25519"
 ARCHIVE_PATH="$RUNTIME_DIR/repo.tgz"
@@ -40,10 +42,10 @@ Options:
   -h, --help                   Show this help
 
 Examples:
-  $(basename "$0") run --region us-west-2
-  $(basename "$0") run --region us-west-2 --destroy-on-success
-  $(basename "$0") ssh --region us-west-2
-  $(basename "$0") destroy --region us-west-2
+  $(basename "$0") run --region us-west-1
+  $(basename "$0") run --region us-west-1 --destroy-on-success
+  $(basename "$0") ssh --region us-west-1
+  $(basename "$0") destroy --region us-west-1
 EOF
 }
 
@@ -61,7 +63,7 @@ Missing required --region argument.
 
 Example:
 
-  ./scripts/ec2-smoke-test.sh run --region us-west-2
+  ./scripts/ec2-smoke-test.sh run --region us-west-1
 EOF
     exit 1
   fi
@@ -282,6 +284,10 @@ run_ansible() {
 
   write_inventory "$host"
 
+  mkdir -p "$ANSIBLE_ROLES_DIR"
+  ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
+  ansible-galaxy role install -r "$ANSIBLE_REQUIREMENTS" -p "$ANSIBLE_ROLES_DIR"
+
   ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
   ansible-playbook \
     -i "$INVENTORY_PATH" \
@@ -321,6 +327,7 @@ run() {
   require_cmd tar
   require_cmd terraform
   require_cmd ansible-playbook
+  require_cmd ansible-galaxy
 
   require_region
   ensure_runtime_dir

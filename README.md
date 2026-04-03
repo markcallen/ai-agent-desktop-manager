@@ -79,6 +79,34 @@ Default:
 - nginx snippet dir: `/etc/nginx/conf.d/agent-desktops`
 - route template: `/desktop/{display}/`
 - state dir: `./data`
+- route auth mode: `none`
+
+### Protected desktop routes
+
+For localhost-only development, leave route auth disabled.
+
+For externally exposed desktops, enable nginx `auth_request` verification:
+
+```bash
+AADM_DESKTOP_ROUTE_AUTH_MODE=auth_request
+AADM_DESKTOP_ROUTE_AUTH_REQUEST_URL=http://127.0.0.1:3001/verify
+AADM_DESKTOP_ROUTE_AUTH_REQUEST_HEADERS=x-auth-request-user,x-orchestrator-token
+```
+
+`AADM_DESKTOP_ROUTE_AUTH_REQUEST_URL` should point at an HTTP verifier that returns:
+
+- `2xx` to allow access
+- `401` or `403` to deny access
+- `5xx` if verification infrastructure fails
+
+The manager always forwards:
+
+- `X-Original-URI`
+- `X-Original-Method`
+- `X-Forwarded-Host`
+- `X-Forwarded-Proto`
+
+It also forwards any request headers listed in `AADM_DESKTOP_ROUTE_AUTH_REQUEST_HEADERS`.
 
 ---
 
@@ -119,6 +147,8 @@ location /desktop/3/ {
 ```
 
 The manager writes that snippet, runs `nginx -t`, then reloads Nginx.
+
+When route protection is enabled, each desktop snippet also includes an internal auth verifier location plus `auth_request` directives on the desktop locations.
 
 ---
 
@@ -233,6 +263,20 @@ curl -sX POST http://127.0.0.1:8899/v1/desktops \
   -d '{ "owner":"codex", "label":"issue-123", "ttlMinutes":120, "startUrl":"https://example.com" }' | jq
 ```
 
+To opt a desktop into route protection explicitly:
+
+```bash
+curl -sX POST http://127.0.0.1:8899/v1/desktops \
+  -H 'content-type: application/json' \
+  -d '{ "owner":"codex", "label":"protected", "routeAuthMode":"auth_request" }' | jq
+```
+
+`routeAuthMode` supports:
+
+- `inherit` to use the deployment default
+- `none` to force an open route
+- `auth_request` to require the configured verifier
+
 ### List
 
 ```bash
@@ -249,7 +293,9 @@ Doctor reports:
 
 - systemd status for VNC/websockify/chrome/aab
 - Nginx snippet path + existence
+- whether the generated desktop route is protected
 - port checks for VNC/websockify/CDP/AAB
+- effective route auth configuration for that desktop
 
 ### Destroy
 

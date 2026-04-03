@@ -1,0 +1,6 @@
+---
+roles:
+  - name: geerlingguy.nodejs
+    src: https://github.com/geerlingguy/ansible-role-nodejs.git
+    scm: git
+    version: 7.1.0

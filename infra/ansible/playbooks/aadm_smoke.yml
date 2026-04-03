@@ -17,6 +17,8 @@
     aadm_auth_token: ''
     aadm_npm_global_bin: /usr/local/bin
     aadm_npm_package: ai-agent-browser
+    aadm_node_bin: /usr/bin/node
+    aadm_npm_bin: /usr/bin/npm
     aadm_smoke_create_desktop: true
     aadm_smoke_destroy_desktop: false
   tasks:
@@ -202,25 +204,25 @@
 
     - name: Install npm dependencies
       ansible.builtin.command:
-        cmd: npm install
+        cmd: '{{ aadm_npm_bin }} install'
         chdir: '{{ aadm_install_dir }}'
       become_user: '{{ aadm_service_user }}'
 
     - name: Install ai-agent-browser npm dependencies
       ansible.builtin.command:
-        cmd: npm install
+        cmd: '{{ aadm_npm_bin }} install'
         chdir: '{{ aab_install_dir }}'
       become_user: '{{ aadm_service_user }}'
 
     - name: Build manager
       ansible.builtin.command:
-        cmd: npm run build
+        cmd: '{{ aadm_npm_bin }} run build'
         chdir: '{{ aadm_install_dir }}'
       become_user: '{{ aadm_service_user }}'
 
     - name: Build ai-agent-browser
       ansible.builtin.command:
-        cmd: npm run build
+        cmd: '{{ aadm_npm_bin }} run build'
         chdir: '{{ aab_install_dir }}'
       become_user: '{{ aadm_service_user }}'
 
@@ -232,7 +234,7 @@
         mode: '0755'
         content: |
           #!/usr/bin/env bash
-          exec /usr/bin/env node /opt/ai-agent-desktop-manager/dist/cli/aadm.js "$@"
+          exec {{ aadm_node_bin }} /opt/ai-agent-desktop-manager/dist/cli/aadm.js "$@"
 
     - name: Install global aab-console CLI wrapper
       ansible.builtin.copy:
@@ -242,7 +244,7 @@
         mode: '0755'
         content: |
           #!/usr/bin/env bash
-          exec /usr/bin/env node /opt/ai-agent-desktop-manager/dist/cli/aab-console.js "$@"
+          exec {{ aadm_node_bin }} /opt/ai-agent-desktop-manager/dist/cli/aab-console.js "$@"
 
     - name: Install global ai-agent-browser CLI wrapper
       ansible.builtin.copy:
@@ -252,7 +254,7 @@
         mode: '0755'
         content: |
           #!/usr/bin/env bash
-          exec /usr/bin/env node /opt/ai-agent-browser/dist/index.js "$@"
+          exec {{ aadm_node_bin }} /opt/ai-agent-browser/dist/index.js "$@"
 
     - name: Install global aab CLI wrapper
       ansible.builtin.copy:
@@ -262,7 +264,7 @@
         mode: '0755'
         content: |
           #!/usr/bin/env bash
-          exec /usr/bin/env node /opt/ai-agent-browser/dist/index.js "$@"
+          exec {{ aadm_node_bin }} /opt/ai-agent-browser/dist/index.js "$@"
 
     - name: Ensure nginx snippet directory exists
       ansible.builtin.file:

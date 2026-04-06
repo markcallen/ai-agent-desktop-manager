@@ -165,23 +165,25 @@ When route protection is enabled, each desktop snippet also includes an internal
 
 ### Optional HTTPS with certbot
 
+The EC2 smoke helper now uses `novnc-openbox` release `v0.1.0` to provision the base Openbox/noVNC/nginx/auth/TLS stack. This repo only layers the manager and its dynamic desktop routes on top.
+
 The smoke/deployment helper can request a certificate with certbot and nginx HTTP-01 when you have:
 
 - a public DNS name pointed at the host
 - inbound port 80 and 443 access to the host
 - a valid email address for Let's Encrypt registration
 
+When you run the EC2 smoke helper, `--tls-domain` is treated as the delegated smoke zone. Terraform creates a per-run hostname in that zone and points it at the EC2 instance automatically before certbot runs. `--tls-domain` and `--tls-email` are required.
+
 Example:
 
 ```bash
-./scripts/ec2-smoke-test.sh run --region us-west-1 --enable-https --tls-domain desktop.example.com --tls-email ops@example.com
+./scripts/ec2-smoke-test.sh run --region us-west-1 --tls-domain smoke.markcallen.dev --tls-email ops@example.com
 ```
-
-That path keeps the default HTTP-only smoke flow unchanged unless you opt in with `--enable-https`.
 
 ### Recommended DNS setup for live TLS smoke tests
 
-The cleanest way to run live TLS smoke tests is to delegate a dedicated subdomain such as `smoke.example.com` to Route 53, then create ephemeral hostnames under that zone for each run.
+The cleanest way to run live TLS smoke tests is to delegate a dedicated subdomain such as `smoke.markcallen.dev` to Route 53, then let Terraform create ephemeral hostnames under that zone for each run.
 
 Why this is the recommended shape:
 
@@ -191,41 +193,34 @@ Why this is the recommended shape:
 
 Recommended flow:
 
-1. Create or reuse a delegated zone such as `smoke.example.com` in Route 53.
+1. Create or reuse a delegated zone such as `smoke.markcallen.dev` in Route 53.
 2. Delegate that subdomain from the parent zone.
-3. Create an A record inside the delegated zone for the smoke host, for example `run-20260403.smoke.example.com`.
-4. Run the smoke helper with `--enable-https` and that hostname.
+3. Run the smoke helper with that delegated zone.
+4. Terraform will mint a per-run hostname in that zone and create the A record automatically.
 
-This repo includes a helper to do the Route 53 side:
+This repo still includes a helper for delegated-zone bootstrap and verification:
 
 ```bash
-./scripts/route53-smoke-subdomain.sh \
-  --subdomain-zone smoke.example.com \
-  --record-name run-20260403.smoke.example.com \
-  --ip 203.0.113.10
+./scripts/route53-smoke-subdomain.sh --subdomain-zone smoke.markcallen.dev --check
+./scripts/route53-smoke-subdomain.sh --subdomain-zone smoke.markcallen.dev
 ```
 
-If the parent zone is also hosted in Route 53, the script will upsert the NS delegation automatically. If the parent zone is managed elsewhere, the script prints the exact name servers to add manually.
+Use `--check` for a read-only validation that the public `NS` delegation for the subdomain matches the Route 53 hosted zone. If the parent zone is also hosted in Route 53, normal mode will upsert the NS delegation automatically. If the parent zone is managed elsewhere, the script prints the exact name servers to add manually.
 
 Cloudflare example:
 
 1. Run the helper once without `--record-name` to create the delegated Route 53 zone and print the Route 53 name servers.
-2. In Cloudflare for the parent zone, add `NS` records for `smoke.example.com` pointing at those Route 53 name servers.
+2. In Cloudflare for the parent zone, add `NS` records for `smoke.markcallen.dev` pointing at those Route 53 name servers.
 3. Keep the final smoke hostname DNS-only. Do not proxy it through Cloudflare.
-4. Rerun the helper with `--record-name` and `--ip` to create the smoke hostname in Route 53.
+4. After delegation is live, run the EC2 smoke helper and let Terraform create the per-run hostname in Route 53.
 
 Example end-to-end:
 
 ```bash
-./scripts/route53-smoke-subdomain.sh --subdomain-zone smoke.example.com
-./scripts/route53-smoke-subdomain.sh \
-  --subdomain-zone smoke.example.com \
-  --record-name run-20260403.smoke.example.com \
-  --ip 203.0.113.10
+./scripts/route53-smoke-subdomain.sh --subdomain-zone smoke.markcallen.dev
 ./scripts/ec2-smoke-test.sh run \
   --region us-west-1 \
-  --enable-https \
-  --tls-domain run-20260403.smoke.example.com \
+  --tls-domain smoke.markcallen.dev \
   --tls-email ops@example.com
 ```
 
@@ -233,7 +228,9 @@ Notes:
 
 - `http-01` requires inbound port 80 and 443 to the smoke host.
 - DNS changes must have propagated before certbot runs.
-- For repeated smoke runs, reuse the delegated zone and only rotate the per-run hostname.
+- For repeated smoke runs, reuse the delegated zone and let Terraform rotate the per-run hostname.
+- `./scripts/ec2-smoke-test.sh run` writes `infra/smoke-test/.runtime/aadm-smoke-summary.json`, and `./scripts/smoke-playwright.sh` can replay a browser smoke test from that summary in CI or locally.
+- `npm run smoke:playwright-test` calls `./scripts/smoke-playwright.sh --test`, which loads the same summary and runs the Playwright smoke assertion instead of taking a screenshot.
 
 ---
 

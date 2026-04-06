@@ -1,6 +1,15 @@
 ---
+collections:
+  - name: ansible.utils
+    version: '>=2.0.0'
+  - name: community.general
+
 roles:
   - name: geerlingguy.nodejs
     src: https://github.com/geerlingguy/ansible-role-nodejs.git
     scm: git
     version: 7.1.0
+  - name: novnc
+    src: https://github.com/markcallen/novnc-openbox.git
+    scm: git
+    version: v0.1.0

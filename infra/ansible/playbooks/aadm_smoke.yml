@@ -17,10 +17,14 @@
     aadm_auth_token: ''
     aadm_npm_global_bin: /usr/local/bin
     aadm_npm_package: ai-agent-browser
-    aadm_enable_https: false
+    aadm_enable_https: true
     aadm_tls_domain: ''
     aadm_tls_email: ''
     aadm_tls_staging: false
+    aadm_vnc_password: SmokePassw0rd!
+    aadm_desktop_route_token_secret: '{{ lookup("ansible.builtin.password", "/dev/null length=64 chars=ascii_letters,digits") }}'
+    aadm_tls_cert_path: '/etc/letsencrypt/live/{{ aadm_tls_domain }}/fullchain.pem'
+    aadm_tls_key_path: '/etc/letsencrypt/live/{{ aadm_tls_domain }}/privkey.pem'
     aadm_smoke_create_desktop: true
     aadm_smoke_destroy_desktop: false
   tasks:
@@ -52,34 +56,33 @@
     - name: Ensure apt prerequisites are present
       ansible.builtin.apt:
         name:
-          - apt-transport-https
-          - ca-certificates
-          - curl
           - git
           - gnupg
           - jq
-          - nginx
-          - novnc
-          - openbox
           - python3
           - python3-apt
-          - python3-websockify
           - rsync
-          - tigervnc-standalone-server
-          - tigervnc-tools
           - wmctrl
           - xauth
           - xfonts-base
-          - xterm
         update_cache: true
 
-    - name: Ensure certbot prerequisites are present when HTTPS is enabled
-      ansible.builtin.apt:
-        name:
-          - certbot
-          - python3-certbot-nginx
-        update_cache: true
-      when: aadm_enable_https | bool
+    - name: Install novnc-openbox base stack from v0.1.0
+      ansible.builtin.include_role:
+        name: novnc
+      vars:
+        vnc_user: ubuntu
+        vnc_display: 1
+        vnc_password: '{{ aadm_vnc_password }}'
+        smoke_test_marker_enabled: true
+        use_certbot: '{{ aadm_enable_https | bool }}'
+        tls_domain: >-
+          {{
+            aadm_tls_domain
+            if (aadm_enable_https | bool and aadm_tls_domain | length > 0)
+            else inventory_hostname
+          }}
+        letsencrypt_email: '{{ aadm_tls_email }}'
 
     - name: Detect node binary path
       ansible.builtin.shell: |
@@ -110,30 +113,6 @@
       register: aadm_node_version
       changed_when: false
       failed_when: not (aadm_node_version.stdout is match("^v22\\."))
-
-    - name: Install Google Chrome signing key
-      ansible.builtin.get_url:
-        url: https://dl.google.com/linux/linux_signing_key.pub
-        dest: /tmp/google-linux-signing-key.pub
-        mode: '0644'
-
-    - name: Dearmor Google Chrome signing key
-      ansible.builtin.command:
-        cmd: gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg /tmp/google-linux-signing-key.pub
-      args:
-        creates: /usr/share/keyrings/google-chrome.gpg
-
-    - name: Configure Google Chrome repository
-      ansible.builtin.copy:
-        dest: /etc/apt/sources.list.d/google-chrome.list
-        mode: '0644'
-        content: |
-          deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main
-
-    - name: Install Google Chrome
-      ansible.builtin.apt:
-        name: google-chrome-stable
-        update_cache: true
 
     - name: Ensure service group exists
       ansible.builtin.group:
@@ -168,6 +147,14 @@
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
           exec openbox-session
+
+    - name: Ensure manager Openbox config directory exists
+      ansible.builtin.file:
+        path: /var/lib/aadm/.config/openbox
+        state: directory
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0755'
 
     - name: Ensure vncserver compatibility symlink exists when needed
       ansible.builtin.file:
@@ -296,28 +283,35 @@
         group: '{{ aadm_service_group }}'
         mode: '0755'
 
-    - name: Ensure default nginx site includes desktop snippets
-      ansible.builtin.blockinfile:
-        path: /etc/nginx/sites-available/default
-        marker: '# {mark} AADM DESKTOP ROUTES'
-        insertafter: 'server_name _;'
-        block: |
-          include /etc/nginx/conf.d/agent-desktops/*.conf;
-
-    - name: Validate HTTPS deployment inputs
+    - name: Validate TLS deployment inputs
       ansible.builtin.assert:
         that:
           - aadm_tls_domain | length > 0
           - aadm_tls_email | length > 0
-        fail_msg: 'aadm_enable_https requires aadm_tls_domain and aadm_tls_email'
-      when: aadm_enable_https | bool
+        fail_msg: 'aadm_smoke requires aadm_tls_domain and aadm_tls_email'
 
-    - name: Set nginx server name for certbot when HTTPS is enabled
+    - name: Ensure novnc nginx site includes manager snippets
+      ansible.builtin.blockinfile:
+        path: /etc/nginx/sites-available/novnc
+        marker: '# {mark} AADM DESKTOP ROUTES'
+        insertbefore: '  # noVNC static \+ websocket proxy'
+        block: |
+          include /etc/nginx/conf.d/agent-desktops/*.conf;
+      notify: Reload aadm nginx
+
+    - name: Ensure novnc nginx site uses the Let's Encrypt certificate
       ansible.builtin.replace:
-        path: /etc/nginx/sites-available/default
-        regexp: '^\s*server_name\s+.*;'
-        replace: '    server_name {{ aadm_tls_domain }};'
-      when: aadm_enable_https | bool
+        path: /etc/nginx/sites-available/novnc
+        regexp: '^\s*ssl_certificate\s+.*;'
+        replace: '  ssl_certificate     {{ aadm_tls_cert_path }};'
+      notify: Reload aadm nginx
+
+    - name: Ensure novnc nginx site uses the Let's Encrypt private key
+      ansible.builtin.replace:
+        path: /etc/nginx/sites-available/novnc
+        regexp: '^\s*ssl_certificate_key\s+.*;'
+        replace: '  ssl_certificate_key {{ aadm_tls_key_path }};'
+      notify: Reload aadm nginx
 
     - name: Render manager environment
       ansible.builtin.copy:
@@ -332,13 +326,13 @@
           AADM_DESKTOP_ROUTE_AUTH_MODE=none
           AADM_DESKTOP_ROUTE_AUTH_REQUEST_URL=
           AADM_DESKTOP_ROUTE_AUTH_REQUEST_HEADERS=
-          AADM_DESKTOP_ROUTE_TOKEN_SECRET=
+          AADM_DESKTOP_ROUTE_TOKEN_SECRET={{ aadm_desktop_route_token_secret }}
           AADM_DESKTOP_ROUTE_TOKEN_TTL_SECONDS=900
           AADM_PUBLIC_BASE_URL={{ aadm_public_base_url }}
           AADM_NGINX_SNIPPET_DIR={{ aadm_nginx_snippet_dir }}
           AADM_STATE_DIR={{ aadm_state_dir }}
-          AADM_DISPLAY_MIN=1
-          AADM_DISPLAY_MAX=10
+          AADM_DISPLAY_MIN=2
+          AADM_DISPLAY_MAX=11
           AADM_WEBSOCKIFY_PORT_MIN=6081
           AADM_WEBSOCKIFY_PORT_MAX=6090
           AADM_CDP_PORT_MIN=9222
@@ -352,6 +346,8 @@
           AADM_UNIT_CHROME=chrome@
           AADM_UNIT_AAB=aab@
           AADM_NOVNC_PATH_PREFIX=/desktop
+      notify:
+        - Restart aadm
 
     - name: Install sudoers allowlist
       ansible.builtin.copy:
@@ -377,29 +373,12 @@
         - '{{ aadm_install_dir }}/systemd/chrome@.service'
         - '{{ aadm_install_dir }}/systemd/aab@.service'
 
-    - name: Ensure nginx is enabled and started
-      ansible.builtin.systemd:
-        name: nginx
-        enabled: true
-        state: started
-
-    - name: Reload nginx after updating the TLS domain
-      ansible.builtin.systemd:
-        name: nginx
-        state: reloaded
-      when: aadm_enable_https | bool
-
-    - name: Request HTTPS certificate with certbot
-      ansible.builtin.command:
-        cmd: >-
-          certbot --nginx --non-interactive --agree-tos --redirect --email {{ aadm_tls_email }} -d {{ aadm_tls_domain }}{% if aadm_tls_staging | bool %} --staging{% endif %}
-      args:
-        creates: '/etc/letsencrypt/live/{{ aadm_tls_domain }}/fullchain.pem'
-      when: aadm_enable_https | bool
-
     - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: true
+
+    - name: Flush handlers after nginx snippet include update
+      ansible.builtin.meta: flush_handlers
 
     - name: Reset failed state for smoke-test units
       ansible.builtin.command:
@@ -433,31 +412,32 @@
           label: ubuntu-24-spot
           ttlMinutes: 120
           startUrl: https://example.com
+          routeAuthMode: token
         return_content: true
         status_code: 200
       register: aadm_create
-      when: aadm_smoke_create_desktop
+      when: aadm_smoke_create_desktop | bool
 
     - name: Wait for smoke desktop websockify port
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: '{{ 6080 + (aadm_create.json.display | int) }}'
+        port: '{{ (6081 - 2) + (aadm_create.json.display | int) }}'
         timeout: 30
-      when: aadm_smoke_create_desktop
+      when: aadm_smoke_create_desktop | bool
 
     - name: Wait for smoke desktop CDP port
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: '{{ 9221 + (aadm_create.json.display | int) }}'
+        port: '{{ (9222 - 2) + (aadm_create.json.display | int) }}'
         timeout: 30
-      when: aadm_smoke_create_desktop
+      when: aadm_smoke_create_desktop | bool
 
     - name: Wait for smoke desktop aab port
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: '{{ 8764 + (aadm_create.json.display | int) }}'
+        port: '{{ (8765 - 2) + (aadm_create.json.display | int) }}'
         timeout: 30
-      when: aadm_smoke_create_desktop
+      when: aadm_smoke_create_desktop | bool
 
     - name: Run doctor on smoke desktop
       ansible.builtin.uri:
@@ -465,15 +445,31 @@
         return_content: true
         status_code: 200
       register: aadm_doctor
-      when: aadm_smoke_create_desktop
+      when: aadm_smoke_create_desktop | bool
+
+    - name: Create smoke desktop access URL for token-protected routes
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:8899/v1/desktops/{{ aadm_create.json.id }}/access-url'
+        method: POST
+        body_format: json
+        body: {}
+        return_content: true
+        status_code: 200
+      register: aadm_access_url
+      when: aadm_smoke_create_desktop | bool
 
     - name: Verify public noVNC route is reachable through nginx
       ansible.builtin.uri:
-        url: 'http://127.0.0.1/desktop/{{ aadm_create.json.display }}/'
+        url: >-
+          {{
+            aadm_access_url.json.accessUrl
+          }}
         return_content: true
-        status_code: 200
+        follow_redirects: none
+        status_code: 302
+        validate_certs: true
       register: aadm_novnc
-      when: aadm_smoke_create_desktop
+      when: aadm_smoke_create_desktop | bool
 
     - name: Destroy smoke desktop when requested
       ansible.builtin.uri:
@@ -482,8 +478,8 @@
         return_content: true
         status_code: 200
       when:
-        - aadm_smoke_create_desktop
-        - aadm_smoke_destroy_desktop
+        - aadm_smoke_create_desktop | bool
+        - aadm_smoke_destroy_desktop | bool
 
     - name: Write smoke summary
       ansible.builtin.copy:
@@ -494,8 +490,12 @@
             "health": {{ aadm_health.json | to_nice_json }},
             "create": {{ aadm_create.json | default({}) | to_nice_json }},
             "doctor": {{ aadm_doctor.json | default({}) | to_nice_json }},
+            "accessUrl": {{ aadm_access_url.json.accessUrl | default(aadm_access_url.json.url | default('')) | to_json }},
+            "novncBaseUrl": {{ ('https://' ~ aadm_tls_domain ~ '/') | to_json }},
             "novnc_status": {{ aadm_novnc.status | default(0) }},
-            "vnc_auth": "disabled_for_smoke_test"
+            "novnc_redirect_location": {{ aadm_novnc.location | default('') | to_json }},
+            "vnc_auth": "novnc_openbox_vnc_password",
+            "vnc_password": {{ aadm_vnc_password | to_json }}
           }
 
     - name: Show aadm CLI usage
@@ -517,3 +517,13 @@
           - 'ai-agent-browser is also available globally:'
           - '  ai-agent-browser --host 127.0.0.1 --port 8765 --cdp-host 127.0.0.1 --cdp-port 9222'
           - '  aab --host 127.0.0.1 --port 8765 --cdp-host 127.0.0.1 --cdp-port 9222'
+
+  handlers:
+    - name: Reload aadm nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+    - name: Restart aadm
+      ansible.builtin.systemd:
+        name: aadm.service
+        state: restarted

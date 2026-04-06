@@ -119,7 +119,7 @@ AADM_DESKTOP_ROUTE_TOKEN_TTL_SECONDS=900
 AADM_PUBLIC_BASE_URL=https://desktop.example.com
 ```
 
-In token mode, the manager mints a short-lived URL that exchanges a one-time token for an HttpOnly cookie, and nginx uses that cookie to protect the desktop route. Keep `AADM_PUBLIC_BASE_URL` on `https://...` when you intend to expose the desktop externally.
+In token mode, the manager mints a short-lived, signed URL that exchanges a token for an HttpOnly cookie; nginx uses that cookie to protect the desktop route. The token is valid until it expires (not single-use), so keep the TTL short and `AADM_PUBLIC_BASE_URL` on `https://...` when exposing the desktop externally.
 
 ---
 

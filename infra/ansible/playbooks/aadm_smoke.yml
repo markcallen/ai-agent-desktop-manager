@@ -288,7 +288,8 @@
         that:
           - aadm_tls_domain | length > 0
           - aadm_tls_email | length > 0
-        fail_msg: 'aadm_smoke requires aadm_tls_domain and aadm_tls_email'
+        fail_msg: 'aadm_smoke requires aadm_tls_domain and aadm_tls_email when aadm_enable_https is true'
+      when: aadm_enable_https | bool
 
     - name: Ensure novnc nginx site includes manager snippets
       ansible.builtin.blockinfile:

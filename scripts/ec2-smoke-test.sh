@@ -295,7 +295,6 @@ terraform_base_args() {
   local web_cidr
   ssh_cidr="$(public_ip_cidr)"
   web_cidr="$WEB_INGRESS_CIDR"
-  web_cidr="0.0.0.0/0"
   if [[ -z "$web_cidr" ]]; then
     web_cidr="$ssh_cidr"
   fi

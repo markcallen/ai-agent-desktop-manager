@@ -393,7 +393,8 @@ export function buildApp() {
 
   app.get('/_aadm/access/:id', async (req, reply) => {
     const id = (req.params as { id: string }).id;
-    const token = (req.query as { token?: string })?.token;
+    const query = req.query as Record<string, string | undefined>;
+    const token = query?.[DESKTOP_ACCESS_TOKEN_QUERY_PARAM];
     const st = await loadState();
     const d = st.desktops.find((desktop) => desktop.id === id);
     if (!d) return reply.code(404).send({ ok: false, error: 'not_found' });

@@ -30,7 +30,7 @@ jobs:
       tag: v${{ steps.select_version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -93,7 +93,7 @@ jobs:
       RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || needs.bump_and_tag.outputs.tag }}
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ env.RELEASE_TAG }}
 

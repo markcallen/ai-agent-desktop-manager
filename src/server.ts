@@ -29,10 +29,16 @@ import {
   systemctlIsActive,
   unitName
 } from './util/systemd.js';
-import { CreateDesktopBody } from './api/types.js';
+import { CreateAccessUrlBody, CreateDesktopBody } from './api/types.js';
 import { isPortOpen } from './util/net.js';
 import { appVersion } from './util/app-version.js';
-import { resolveDesktopRouteAuth } from './util/route-auth.js';
+import {
+  createDesktopAccessToken,
+  desktopAccessCookieName,
+  DESKTOP_ACCESS_TOKEN_QUERY_PARAM,
+  resolveDesktopRouteAuth,
+  verifyDesktopAccessToken
+} from './util/route-auth.js';
 
 function desktopId(display: number) {
   return `desk-${display}`;
@@ -49,8 +55,87 @@ function novncUrlFor(display: number) {
   return `${base}${prefix}/${display}/vnc.html?${params.toString()}`;
 }
 
+function novncRelativeUrlFor(display: number) {
+  const prefix = config.novncPathPrefix.replace(/\/$/, '');
+  const params = new URLSearchParams({
+    path: `${prefix.replace(/^\//, '')}/${display}/websockify`,
+    resize: 'remote',
+    autoconnect: '1'
+  });
+  return `${prefix}/${display}/vnc.html?${params.toString()}`;
+}
+
+function desktopAccessPathFor(display: number) {
+  const prefix = config.novncPathPrefix.replace(/\/$/, '');
+  return `${prefix}/${display}/access`;
+}
+
 function aabUrlFor(port: number) {
   return `http://127.0.0.1:${port}`;
+}
+
+function parseCookieValue(rawCookieHeader: string | undefined, name: string) {
+  if (!rawCookieHeader) return undefined;
+
+  for (const part of rawCookieHeader.split(';')) {
+    const [cookieName, ...valueParts] = part.trim().split('=');
+    if (cookieName === name) {
+      return valueParts.join('=');
+    }
+  }
+
+  return undefined;
+}
+
+function getDesktopAccessTokenSecret() {
+  if (!config.desktopRouteTokenSecret) {
+    throw new Error('invalid_config:desktop_route_token_secret_required');
+  }
+  return config.desktopRouteTokenSecret;
+}
+
+function mintDesktopAccessUrl(
+  desktop: Pick<DesktopRecord, 'id' | 'display' | 'routeAuth'>,
+  ttlSeconds?: number,
+  issuedAtMs = nowMs()
+) {
+  if (desktop.routeAuth.mode !== 'token') return undefined;
+
+  const effectiveTtlSeconds = ttlSeconds ?? desktop.routeAuth.token.ttlSeconds;
+  const token = createDesktopAccessToken(
+    desktop.id,
+    getDesktopAccessTokenSecret(),
+    effectiveTtlSeconds,
+    issuedAtMs
+  );
+  const base = config.publicBaseUrl.replace(/\/$/, '');
+  const accessUrl = new URL(`${base}${desktopAccessPathFor(desktop.display)}`);
+  accessUrl.searchParams.set(DESKTOP_ACCESS_TOKEN_QUERY_PARAM, token);
+
+  return {
+    accessUrl: accessUrl.toString(),
+    expiresAt: issuedAtMs + effectiveTtlSeconds * 1000
+  };
+}
+
+function buildDesktopAccessCookie(
+  desktop: Pick<DesktopRecord, 'id' | 'display'>,
+  token: string,
+  expiresAt: number
+) {
+  const cookieParts = [
+    `${desktopAccessCookieName(desktop.id)}=${token}`,
+    `Path=${config.novncPathPrefix.replace(/\/$/, '')}/${desktop.display}/`,
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${Math.max(1, Math.floor((expiresAt - nowMs()) / 1000))}`
+  ];
+
+  if (new URL(config.publicBaseUrl).protocol === 'https:') {
+    cookieParts.push('Secure');
+  }
+
+  return cookieParts.join('; ');
 }
 
 async function withStateLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -258,6 +343,119 @@ export function buildApp() {
     return d;
   });
 
+  app.post('/v1/desktops/:id/access-url', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const parsed = CreateAccessUrlBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        ok: false,
+        error: 'invalid_body',
+        details: parsed.error.flatten()
+      });
+    }
+
+    const st = await loadState();
+    const d = st.desktops.find((desktop) => desktop.id === id);
+    if (!d) return reply.code(404).send({ ok: false, error: 'not_found' });
+    if (d.routeAuth.mode !== 'token') {
+      return reply.code(400).send({
+        ok: false,
+        error: 'route_auth_mode_not_supported'
+      });
+    }
+
+    const requestedTtlSeconds = parsed.data.ttlSeconds;
+    if (
+      requestedTtlSeconds &&
+      requestedTtlSeconds > config.desktopRouteTokenTtlSeconds
+    ) {
+      return reply.code(400).send({
+        ok: false,
+        error: 'ttl_seconds_too_large',
+        maxTtlSeconds: config.desktopRouteTokenTtlSeconds
+      });
+    }
+
+    const access = mintDesktopAccessUrl(d, requestedTtlSeconds);
+    if (!access) {
+      return reply
+        .code(500)
+        .send({ ok: false, error: 'route_auth_mode_not_supported' });
+    }
+
+    return {
+      id: d.id,
+      routeAuth: d.routeAuth,
+      accessUrl: access.accessUrl,
+      expiresAt: access.expiresAt
+    };
+  });
+
+  app.get('/_aadm/access/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const query = req.query as Record<string, string | undefined>;
+    const token = query?.[DESKTOP_ACCESS_TOKEN_QUERY_PARAM];
+    const st = await loadState();
+    const d = st.desktops.find((desktop) => desktop.id === id);
+    if (!d) return reply.code(404).send({ ok: false, error: 'not_found' });
+    if (d.routeAuth.mode !== 'token') {
+      return reply.code(404).send({ ok: false, error: 'not_found' });
+    }
+    if (!token) {
+      return reply.code(401).send({ ok: false, error: 'missing_access_token' });
+    }
+
+    const verified = verifyDesktopAccessToken(
+      token,
+      d.id,
+      getDesktopAccessTokenSecret()
+    );
+    if (!verified) {
+      return reply.code(401).send({ ok: false, error: 'invalid_access_token' });
+    }
+
+    reply.header('cache-control', 'no-store');
+    reply.header(
+      'set-cookie',
+      buildDesktopAccessCookie(d, token, verified.expiresAt)
+    );
+    return reply.redirect(novncRelativeUrlFor(d.display));
+  });
+
+  app.get('/_aadm/verify/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const st = await loadState();
+    const d = st.desktops.find((desktop) => desktop.id === id);
+    if (!d) return reply.code(404).send({ ok: false, error: 'not_found' });
+    if (d.routeAuth.mode !== 'token') {
+      return reply.code(404).send({ ok: false, error: 'not_found' });
+    }
+
+    const token = parseCookieValue(
+      req.headers.cookie,
+      desktopAccessCookieName(d.id)
+    );
+    if (!token) {
+      return reply
+        .code(401)
+        .send({ ok: false, error: 'missing_access_cookie' });
+    }
+
+    const verified = verifyDesktopAccessToken(
+      token,
+      d.id,
+      getDesktopAccessTokenSecret()
+    );
+    if (!verified) {
+      return reply
+        .code(401)
+        .send({ ok: false, error: 'invalid_access_cookie' });
+    }
+
+    reply.header('cache-control', 'no-store');
+    return reply.code(204).send();
+  });
+
   app.post('/v1/desktops', async (req, reply) => {
     const parsed = CreateDesktopBody.safeParse(req.body ?? {});
     if (!parsed.success)
@@ -380,6 +578,8 @@ export function buildApp() {
         });
       }
 
+      const access = mintDesktopAccessUrl(record);
+
       return {
         id: record.id,
         display: record.display,
@@ -387,7 +587,13 @@ export function buildApp() {
         aabUrl: record.aabUrl,
         cdp: { host: '127.0.0.1', port: record.cdpPort },
         status: record.status,
-        routeAuth: record.routeAuth
+        routeAuth: record.routeAuth,
+        ...(access
+          ? {
+              accessUrl: access.accessUrl,
+              accessUrlExpiresAt: access.expiresAt
+            }
+          : {})
       };
     });
   });

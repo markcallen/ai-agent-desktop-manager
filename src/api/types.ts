@@ -8,3 +8,7 @@ export const CreateDesktopBody = z.object({
   startUrl: z.string().url().optional(),
   routeAuthMode: RouteAuthRequestModeSchema.optional()
 });
+
+export const CreateAccessUrlBody = z.object({
+  ttlSeconds: z.number().int().positive().max(86_400).optional()
+});

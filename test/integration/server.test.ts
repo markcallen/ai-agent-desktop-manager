@@ -30,6 +30,8 @@ async function importServerWithEnv() {
     'x-auth-request-user',
     'x-orchestrator-token'
   ];
+  configMod.config.desktopRouteTokenSecret = 'test-secret';
+  configMod.config.desktopRouteTokenTtlSeconds = 900;
   configMod.config.stateDir = stateDir;
   configMod.config.nginxSnippetDir = nginxDir;
   configMod.config.publicBaseUrl = 'https://host.example.com';
@@ -210,6 +212,82 @@ test(
     const snippet = await fs.readFile(snippetPath, 'utf-8');
     assert.match(snippet, /auth_request \/_aadm\/auth\/desk-2;/);
     assert.match(snippet, /proxy_pass http:\/\/127\.0\.0\.1:3001\/verify;/);
+  }
+);
+
+test(
+  'create with token route protection returns a secure access url and verifier endpoints honor it',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+    calls = [];
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      payload: {
+        owner: 'codex',
+        label: 'token-protected',
+        routeAuthMode: 'token'
+      }
+    });
+    assert.equal(create.statusCode, 200);
+    assert.deepEqual(create.json().routeAuth, {
+      mode: 'token',
+      token: {
+        ttlSeconds: 900
+      }
+    });
+    assert.match(
+      create.json().accessUrl,
+      /^https:\/\/host\.example\.com\/desktop\/3\/access\?token=/
+    );
+
+    const returnedAccessUrl = new URL(create.json().accessUrl);
+    const access = await app.inject({
+      method: 'GET',
+      url: `/_aadm/access/desk-3${returnedAccessUrl.search}`
+    });
+    assert.equal(access.statusCode, 302);
+    assert.match(access.headers.location, /^\/desktop\/3\/vnc\.html\?/);
+    assert.match(access.headers['set-cookie'] ?? '', /HttpOnly/);
+    assert.match(access.headers['set-cookie'] ?? '', /Secure/);
+
+    const verifyDenied = await app.inject({
+      method: 'GET',
+      url: '/_aadm/verify/desk-3'
+    });
+    assert.equal(verifyDenied.statusCode, 401);
+
+    const verifyAllowed = await app.inject({
+      method: 'GET',
+      url: '/_aadm/verify/desk-3',
+      headers: {
+        cookie: String(access.headers['set-cookie']).split(';')[0]
+      }
+    });
+    assert.equal(verifyAllowed.statusCode, 204);
+
+    const minted = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops/desk-3/access-url',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      payload: { ttlSeconds: 120 }
+    });
+    assert.equal(minted.statusCode, 200);
+    assert.match(
+      minted.json().accessUrl,
+      /^https:\/\/host\.example\.com\/desktop\/3\/access\?token=/
+    );
+
+    const snippetPath = path.join(tmpRoot, 'nginx', 'desk-3.conf');
+    const snippet = await fs.readFile(snippetPath, 'utf-8');
+    assert.match(
+      snippet,
+      /proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/verify\/desk-3;/
+    );
+    assert.match(snippet, /location = \/desktop\/3\/access/);
   }
 );
 

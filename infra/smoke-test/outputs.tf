@@ -25,3 +25,7 @@ output "http_url" {
 output "https_url" {
   value = "https://${aws_instance.smoke.public_ip}"
 }
+
+output "tls_domain" {
+  value = local.generated_route53_record_name
+}

@@ -1,9 +1,29 @@
 locals {
   common_tags = {
     Project   = "ai-agent-desktop-manager"
+    Env       = var.env_tag
     ManagedBy = "terraform"
     Purpose   = "smoke-test"
   }
+
+  route53_zone_enabled = trimspace(var.route53_zone_name) != ""
+  route53_zone_fqdn    = trimsuffix(trimspace(var.route53_zone_name), ".")
+  route53_record_label = substr(
+    trim(
+      replace(replace(replace(lower(var.name_prefix), "_", "-"), ".", "-"), " ", "-"),
+      "-"
+    ),
+    0,
+    24
+  )
+  generated_route53_record_name = local.route53_zone_enabled ? (
+    trimspace(var.route53_record_name) != "" ? trimsuffix(trimspace(var.route53_record_name), ".") : format(
+      "%s-%s.%s",
+      local.route53_record_label != "" ? local.route53_record_label : "aadm-smoke",
+      random_id.route53_hostname[0].hex,
+      local.route53_zone_fqdn
+    )
+  ) : ""
 }
 
 data "aws_vpc" "default" {
@@ -40,6 +60,17 @@ data "aws_ami" "ubuntu_2404" {
     name   = "root-device-type"
     values = ["ebs"]
   }
+}
+
+data "aws_route53_zone" "smoke" {
+  count        = local.route53_zone_enabled ? 1 : 0
+  name         = "${local.route53_zone_fqdn}."
+  private_zone = false
+}
+
+resource "random_id" "route53_hostname" {
+  count       = local.route53_zone_enabled && trimspace(var.route53_record_name) == "" ? 1 : 0
+  byte_length = 3
 }
 
 resource "aws_security_group" "smoke" {
@@ -134,4 +165,13 @@ resource "aws_instance" "smoke" {
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-host"
   })
+}
+
+resource "aws_route53_record" "smoke_host" {
+  count   = local.route53_zone_enabled ? 1 : 0
+  zone_id = data.aws_route53_zone.smoke[0].zone_id
+  name    = local.generated_route53_record_name
+  type    = "A"
+  ttl     = 60
+  records = [aws_instance.smoke.public_ip]
 }

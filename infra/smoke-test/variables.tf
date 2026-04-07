@@ -22,6 +22,12 @@ variable "root_volume_size_gb" {
   default     = 40
 }
 
+variable "env_tag" {
+  description = "Environment tag value applied to smoke resources."
+  type        = string
+  default     = "smoke"
+}
+
 variable "ssh_ingress_cidr" {
   description = "CIDR allowed to SSH to the smoke test host."
   type        = string
@@ -43,4 +49,16 @@ variable "spot_max_price" {
   type        = string
   default     = null
   nullable    = true
+}
+
+variable "route53_zone_name" {
+  description = "Optional delegated public Route 53 zone used for live TLS smoke hostnames, for example smoke.markcallen.dev."
+  type        = string
+  default     = ""
+}
+
+variable "route53_record_name" {
+  description = "Optional explicit smoke hostname to create inside route53_zone_name."
+  type        = string
+  default     = ""
 }

@@ -30,8 +30,8 @@ ACTION="run"
 WEB_INGRESS_CIDR=""
 PUBLIC_WEB_INGRESS="false"
 
-usage() {
-  cat <<EOF
+  usage() {
+   cat <<EOF
 Usage: $(basename "$0") [run|destroy|ssh] [options]
 
 Options:
@@ -40,23 +40,14 @@ Options:
   --name-prefix <prefix>       Name prefix for AWS resources (default: $NAME_PREFIX)
   --spot-max-price <price>     Optional spot max price
   --aab-npm-package <package>  npm package used for ai-agent-browser (default: $AAB_NPM_PACKAGE)
-  --web-ingress-cidr <cidr>    CIDR allowed to reach HTTP/HTTPS (default: your current IP)
-  --public-web-ingress         Allow HTTP/HTTPS from 0.0.0.0/0
   --tls-domain <domain>        Delegated Route 53 zone used to mint a per-run smoke hostname
   --tls-email <email>          Email address used for certbot registration
   --tls-staging                Use the certbot staging endpoint
   --destroy-desktop            Destroy the test desktop after verification
   --destroy-on-success         Destroy the instance and AWS resources after a successful run
   -h, --help                   Show this help
-
-Examples:
-  $(basename "$0") run --region us-west-1 --tls-domain smoke.markcallen.dev --tls-email ops@example.com
-  $(basename "$0") run --region us-west-1 --destroy-on-success
-  $(basename "$0") run --region us-west-1 --tls-domain smoke.markcallen.dev --tls-email ops@example.com
-  $(basename "$0") ssh --region us-west-1
-  $(basename "$0") destroy --region us-west-1
 EOF
-}
+  }
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -290,38 +281,30 @@ public_ip_cidr() {
   printf '%s/32' "$ip"
 }
 
-terraform_base_args() {
-  local ssh_cidr
-  local web_cidr
-  ssh_cidr="$(public_ip_cidr)"
-  web_cidr="$WEB_INGRESS_CIDR"
-  if [[ -z "$web_cidr" ]]; then
-    web_cidr="$ssh_cidr"
-  fi
-  if [[ "$PUBLIC_WEB_INGRESS" == "true" ]]; then
-    web_cidr="0.0.0.0/0"
-  fi
+  terraform_base_args() {
+    local ssh_cidr
+    ssh_cidr="$(public_ip_cidr)"
 
-  local args=(
-    -chdir="$TF_DIR"
-    -var "aws_region=$AWS_REGION"
-    -var "instance_type=$INSTANCE_TYPE"
-    -var "name_prefix=$NAME_PREFIX"
-    -var "public_key=$(cat "$KEY_PATH.pub")"
-    -var "ssh_ingress_cidr=$ssh_cidr"
-    -var "web_ingress_cidr=$web_cidr"
-  )
+    local args=(
+      -chdir="$TF_DIR"
+      -var "aws_region=$AWS_REGION"
+      -var "instance_type=$INSTANCE_TYPE"
+      -var "name_prefix=$NAME_PREFIX"
+      -var "public_key=$(cat "$KEY_PATH.pub")"
+      -var "ssh_ingress_cidr=$ssh_cidr"
+      -var "web_ingress_cidr=0.0.0.0/0"
+    )
 
-  if [[ -n "$SPOT_MAX_PRICE" ]]; then
-    args+=(-var "spot_max_price=$SPOT_MAX_PRICE")
-  fi
+    if [[ -n "$SPOT_MAX_PRICE" ]]; then
+      args+=(-var "spot_max_price=$SPOT_MAX_PRICE")
+    fi
 
-  if [[ -n "$TLS_DOMAIN" ]]; then
-    args+=(-var "route53_zone_name=$TLS_DOMAIN")
-  fi
+    if [[ -n "$TLS_DOMAIN" ]]; then
+      args+=(-var "route53_zone_name=$TLS_DOMAIN")
+    fi
 
-  printf '%s\n' "${args[@]}"
-}
+    printf '%s\n' "${args[@]}"
+  }
 
 terraform_init() {
   terraform -chdir="$TF_DIR" init

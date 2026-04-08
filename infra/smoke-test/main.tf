@@ -87,19 +87,19 @@ resource "aws_security_group" "smoke" {
   }
 
   ingress {
-    description = "HTTP from configured CIDR"
+    description = "HTTP from anywhere"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = [var.web_ingress_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
-    description = "HTTPS from configured CIDR"
+    description = "HTTPS from anywhere"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = [var.web_ingress_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {

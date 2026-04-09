@@ -9,6 +9,10 @@ updates:
       - dependency-name: 'typescript'
         update-types:
           - 'version-update:semver-major'
+      - dependency-name: '@types/node'
+        versions:
+          - '<22'
+          - '>=23'
     groups:
       typescript:
         patterns:

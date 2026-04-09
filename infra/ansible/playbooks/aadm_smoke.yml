@@ -324,7 +324,7 @@
           AADM_HOST=127.0.0.1
           AADM_PORT=8899
           AADM_AUTH_TOKEN={{ aadm_auth_token }}
-          AADM_DESKTOP_ROUTE_AUTH_MODE=none
+            AADM_DESKTOP_ROUTE_AUTH_MODE=token
           AADM_DESKTOP_ROUTE_AUTH_REQUEST_URL=
           AADM_DESKTOP_ROUTE_AUTH_REQUEST_HEADERS=
           AADM_DESKTOP_ROUTE_TOKEN_SECRET={{ aadm_desktop_route_token_secret }}

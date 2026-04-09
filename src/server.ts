@@ -171,7 +171,8 @@ async function stopUnitsByNames(
 
 async function startUnits(
   display: number,
-  log: { warn: (obj: unknown, msg: string) => void }
+  log: { warn: (obj: unknown, msg: string) => void },
+  startUrl?: string
 ) {
   const uVnc = unitName(config.unitVnc, display);
   const uWs = unitName(config.unitWebsockify, display);
@@ -181,13 +182,13 @@ async function startUnits(
 
   try {
     // Start in dependency order.
-    await systemctlStart(uVnc);
+    await systemctlStart(uVnc, { START_URL: startUrl });
     started.push(uVnc);
-    await systemctlStart(uWs);
+    await systemctlStart(uWs, { START_URL: startUrl });
     started.push(uWs);
-    await systemctlStart(uChrome);
+    await systemctlStart(uChrome, { START_URL: startUrl });
     started.push(uChrome);
-    await systemctlStart(uAab);
+    await systemctlStart(uAab, { START_URL: startUrl });
     started.push(uAab);
   } catch (e) {
     await stopUnitsByNames([...started].reverse(), log);

@@ -8,7 +8,7 @@ User=aadm
 Group=aadm
 EnvironmentFile=-/opt/ai-agent-desktop-manager/.env
 Environment=HOME=/var/lib/aadm
-ExecStart=/usr/bin/bash -lc 'DISPLAY_MIN=${AADM_DISPLAY_MIN:-1}; CDP_BASE=${AADM_CDP_PORT_MIN:-9222}; export DISPLAY=:%i; CDP_PORT=$((CDP_BASE + %i - DISPLAY_MIN)); PROF="$HOME/.chrome-agent-%i"; exec google-chrome --remote-debugging-address=127.0.0.1 --remote-debugging-port="$CDP_PORT" --user-data-dir="$PROF" --no-first-run --disable-features=TranslateUI --start-maximized --window-position=0,0'
+ ExecStart=/usr/bin/bash -lc 'DISPLAY_MIN=${AADM_DISPLAY_MIN:-1}; CDP_BASE=${AADM_CDP_PORT_MIN:-9222}; export DISPLAY=:%i; CDP_PORT=$((CDP_BASE + %i - DISPLAY_MIN)); PROF="$HOME/.chrome-agent-%i"; START_URL="${START_URL:-}"; exec google-chrome --remote-debugging-address=127.0.0.1 --remote-debugging-port="$CDP_PORT" --user-data-dir="$PROF" --no-first-run --disable-features=TranslateUI --start-maximized --window-position=0,0 ${START_URL:+--new-window "$START_URL"}'
 Restart=on-failure
 
 [Install]

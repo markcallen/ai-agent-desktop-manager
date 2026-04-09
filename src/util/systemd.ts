@@ -13,9 +13,14 @@ function throwOnFailure(
   throw new Error(`${op}_failed:${unit}: ${details || `exit_code_${code}`}`);
 }
 
-export async function systemctlStart(unit: string) {
-  const res = await execCmd(config.systemctlBin, ['start', unit], {
-    sudo: true
+export async function systemctlStart(
+  unit: string,
+  extraEnv?: Record<string, string>
+) {
+  const args = ['start', unit];
+  const res = await execCmd(config.systemctlBin, args, {
+    sudo: true,
+    ...(extraEnv && { env: extraEnv })
   });
   throwOnFailure('systemctl_start', unit, res.code, res.stderr, res.stdout);
   return res;

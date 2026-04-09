@@ -7,7 +7,7 @@ Type=simple
 User=aadm
 Group=aadm
 EnvironmentFile=-/opt/ai-agent-desktop-manager/.env
-ExecStart=/usr/bin/bash -lc 'DISPLAY_MIN=${AADM_DISPLAY_MIN:-1}; AAB_BASE=${AADM_AAB_PORT_MIN:-8765}; CDP_BASE=${AADM_CDP_PORT_MIN:-9222}; AAB_PORT=$((AAB_BASE + %i - DISPLAY_MIN)); CDP_PORT=$((CDP_BASE + %i - DISPLAY_MIN)); exec /usr/local/bin/ai-agent-browser --host 127.0.0.1 --port "$AAB_PORT" --cdp-host 127.0.0.1 --cdp-port "$CDP_PORT"'
+ ExecStart=/usr/bin/bash -lc 'DISPLAY_MIN=${AADM_DISPLAY_MIN:-1}; AAB_BASE=${AADM_AAB_PORT_MIN:-8765}; CDP_BASE=${AADM_CDP_PORT_MIN:-9222}; export DISPLAY=:%i; AAB_PORT=$((AAB_BASE + %i - DISPLAY_MIN)); CDP_PORT=$((CDP_BASE + %i - DISPLAY_MIN)); START_URL="${START_URL:-}"; exec /usr/local/bin/ai-agent-browser --host 127.0.0.1 --port "$AAB_PORT" --cdp-host 127.0.0.1 --cdp-port "$CDP_PORT" ${START_URL:+"--start-url" "$START_URL"}'
 Restart=on-failure
 
 [Install]

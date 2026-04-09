@@ -182,13 +182,14 @@ async function startUnits(
 
   try {
     // Start in dependency order.
-    await systemctlStart(uVnc, { START_URL: startUrl });
+    const env = startUrl ? { START_URL: startUrl } : undefined;
+    await systemctlStart(uVnc, env);
     started.push(uVnc);
-    await systemctlStart(uWs, { START_URL: startUrl });
+    await systemctlStart(uWs, env);
     started.push(uWs);
-    await systemctlStart(uChrome, { START_URL: startUrl });
+    await systemctlStart(uChrome, env);
     started.push(uChrome);
-    await systemctlStart(uAab, { START_URL: startUrl });
+    await systemctlStart(uAab, env);
     started.push(uAab);
   } catch (e) {
     await stopUnitsByNames([...started].reverse(), log);
@@ -511,7 +512,7 @@ export function buildApp() {
 
       // 1) start units
       try {
-        await startUnits(alloc.display, app.log);
+        await startUnits(alloc.display, app.log, parsed.data.startUrl);
       } catch (e) {
         return reply.code(500).send({
           ok: false,

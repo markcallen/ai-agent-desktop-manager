@@ -13,6 +13,7 @@
     "package:release": "bash ./scripts/package-release.sh",
     "start": "node dist/index.js",
     "cli": "tsx src/cli/aadm.ts",
+    "mcp": "tsx src/cli/aadm-mcp.ts",
     "aab-console": "tsx src/cli/aab-console.ts",
     "lint:smoke": "node --check smoke/browser-smoke.mjs",
     "smoke:playwright": "bash ./scripts/smoke-playwright.sh",
@@ -25,6 +26,7 @@
     "prettier:fix": "prettier . --write"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.1",
     "proper-lockfile": "^4.1.2",

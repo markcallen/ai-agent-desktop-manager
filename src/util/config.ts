@@ -6,6 +6,7 @@ import {
   normalizeDesktopRouteTokenTtlSeconds,
   parseForwardedHeaderNames
 } from './route-auth.js';
+import { parseStartUrlDomainAllowlist } from './start-url.js';
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ export const Config = z.object({
   port: z.number().int().default(8899),
 
   authToken: z.string().optional(),
+  ttlSweepIntervalMs: z.number().int().nonnegative().default(60_000),
   desktopRouteAuthMode: RouteAuthModeSchema.default('none'),
   desktopRouteAuthRequestUrl: z.string().url().optional(),
   desktopRouteAuthRequestHeaders: z.array(z.string()).default([]),
@@ -29,6 +31,7 @@ export const Config = z.object({
   desktopRouteTokenTtlSeconds: z.number().int().default(900),
 
   publicBaseUrl: z.string().url().default('https://host.example.com'),
+  allowedStartUrlDomains: z.array(z.string()).default([]),
 
   nginxSnippetDir: z.string().default('/etc/nginx/conf.d/agent-desktops'),
   nginxBin: z.string().default('/usr/sbin/nginx'),
@@ -60,6 +63,7 @@ export const config = Config.parse({
   port: intFromEnv('AADM_PORT', 8899),
 
   authToken: process.env.AADM_AUTH_TOKEN || undefined,
+  ttlSweepIntervalMs: intFromEnv('AADM_TTL_SWEEP_INTERVAL_MS', 60_000),
   desktopRouteAuthMode: process.env.AADM_DESKTOP_ROUTE_AUTH_MODE ?? 'none',
   desktopRouteAuthRequestUrl:
     process.env.AADM_DESKTOP_ROUTE_AUTH_REQUEST_URL || undefined,
@@ -74,6 +78,9 @@ export const config = Config.parse({
   ),
 
   publicBaseUrl: process.env.AADM_PUBLIC_BASE_URL ?? 'https://host.example.com',
+  allowedStartUrlDomains: parseStartUrlDomainAllowlist(
+    process.env.AADM_ALLOWED_START_URL_DOMAINS
+  ),
 
   nginxSnippetDir:
     process.env.AADM_NGINX_SNIPPET_DIR ?? '/etc/nginx/conf.d/agent-desktops',

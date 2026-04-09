@@ -80,6 +80,7 @@ Default:
 - route template: `/desktop/{display}/`
 - state dir: `./data`
 - route auth mode: `none`
+- TTL sweeper: every 60 seconds, but it only deletes desktops created with `ttlMinutes`
 
 ### Protected desktop routes
 
@@ -345,6 +346,8 @@ curl -sX POST http://127.0.0.1:8899/v1/desktops \
   -d '{ "owner":"codex", "label":"issue-123", "ttlMinutes":120, "startUrl":"https://example.com" }' | jq
 ```
 
+`ttlMinutes` is optional. If omitted, the desktop does not expire automatically.
+
 To opt a desktop into route protection explicitly:
 
 ```bash
@@ -358,6 +361,9 @@ curl -sX POST http://127.0.0.1:8899/v1/desktops \
 - `inherit` to use the deployment default
 - `none` to force an open route
 - `auth_request` to require the configured verifier
+- `token` to return a manager-issued access URL
+
+If `AADM_ALLOWED_START_URL_DOMAINS` is set, `startUrl` must match one of the allowed hostnames or subdomains.
 
 ### List
 
@@ -421,6 +427,18 @@ npm run cli -- access-url --id desk-3
 npm run cli -- list
 npm run cli -- destroy --id desk-3
 ```
+
+---
+
+## MCP server
+
+This repo also includes a stdio MCP adapter that exposes the desktop lifecycle as tools for agent clients:
+
+```bash
+AADM_URL=http://127.0.0.1:8899 npm run mcp
+```
+
+See [docs/mcp.md](./docs/mcp.md) for the tool list and Codex/Claude wiring notes.
 
 ---
 
@@ -492,6 +510,7 @@ See `.env.example` for:
 - auth token
 - desktop route auth mode and verifier settings
 - token route auth secret and TTL
+- TTL sweep interval and `startUrl` allowlist
 - HTTPS/certbot smoke deployment variables
 - base URL template for noVNC links
 - state directory

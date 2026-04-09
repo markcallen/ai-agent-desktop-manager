@@ -1,8 +1,10 @@
 import Fastify from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import lockfile from 'proper-lockfile';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
+import crypto from 'node:crypto';
 
 import { config } from './util/config.js';
 import { authHook } from './util/auth.js';
@@ -33,12 +35,19 @@ import { CreateAccessUrlBody, CreateDesktopBody } from './api/types.js';
 import { isPortOpen } from './util/net.js';
 import { appVersion } from './util/app-version.js';
 import {
+  buildLoggerOptions,
+  attachRequestIdHeader,
+  REQUEST_ID_HEADER
+} from './util/logging.js';
+import {
   createDesktopAccessToken,
   desktopAccessCookieName,
   DESKTOP_ACCESS_TOKEN_QUERY_PARAM,
   resolveDesktopRouteAuth,
   verifyDesktopAccessToken
 } from './util/route-auth.js';
+import { findPortCollisions } from './util/port-usage.js';
+import { isStartUrlAllowed } from './util/start-url.js';
 
 function desktopId(display: number) {
   return `desk-${display}`;
@@ -320,9 +329,80 @@ async function restoreDestroyedDesktop(
   return issues;
 }
 
-export function buildApp() {
-  const app = Fastify({ logger: true });
+type BuildAppOptions = {
+  loggerStream?: NodeJS.WritableStream;
+};
+
+function genReqId(req: { headers: Record<string, unknown> }) {
+  const incoming = req.headers[REQUEST_ID_HEADER];
+  if (typeof incoming === 'string' && incoming.trim()) {
+    return incoming.trim();
+  }
+  return crypto.randomUUID();
+}
+
+function authHeadersForInternalRequest() {
+  if (!config.authToken) return undefined;
+  return { authorization: `Bearer ${config.authToken}` };
+}
+
+export async function sweepExpiredDesktops(
+  app: Pick<FastifyInstance, 'inject' | 'log'>,
+  now = nowMs()
+) {
+  const state = await loadState();
+  const expiredDesktopIds = state.desktops
+    .filter(
+      (desktop) => desktop.expiresAt !== undefined && desktop.expiresAt <= now
+    )
+    .map((desktop) => desktop.id);
+
+  const deleted: string[] = [];
+  const failed: Array<{ id: string; statusCode: number; body: unknown }> = [];
+
+  for (const id of expiredDesktopIds) {
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/v1/desktops/${id}`,
+      headers: authHeadersForInternalRequest()
+    });
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      deleted.push(id);
+      continue;
+    }
+
+    let body: unknown = response.body;
+    try {
+      body = response.json();
+    } catch {
+      // keep raw body
+    }
+
+    failed.push({ id, statusCode: response.statusCode, body });
+  }
+
+  if (deleted.length > 0) {
+    app.log.info({ deleted }, 'deleted expired desktops');
+  }
+  if (failed.length > 0) {
+    app.log.warn({ failed }, 'failed to delete some expired desktops');
+  }
+
+  return { deleted, failed };
+}
+
+export function buildApp(options: BuildAppOptions = {}) {
+  const app = Fastify({
+    logger: buildLoggerOptions(options.loggerStream) as never,
+    genReqId,
+    requestIdHeader: 'x-request-id',
+    disableRequestLogging: false
+  }) as unknown as FastifyInstance;
   app.addHook('preHandler', authHook);
+  app.addHook('onRequest', async (req, reply) => {
+    attachRequestIdHeader(reply, req.log, req.id);
+  });
 
   app.get('/health', async () => {
     return {
@@ -467,9 +547,33 @@ export function buildApp() {
         details: parsed.error.flatten()
       });
 
+    if (
+      parsed.data.startUrl &&
+      !isStartUrlAllowed(parsed.data.startUrl, config.allowedStartUrlDomains)
+    ) {
+      return reply.code(400).send({
+        ok: false,
+        error: 'start_url_not_allowed',
+        allowedDomains: config.allowedStartUrlDomains
+      });
+    }
+
     return await withStateLock(async () => {
       const st = await loadState();
       const alloc = allocate(st.desktops);
+      const portCollisions = await findPortCollisions([
+        alloc.vncPort,
+        alloc.wsPort,
+        alloc.cdpPort,
+        alloc.aabPort
+      ]);
+      if (portCollisions.length > 0) {
+        return reply.code(409).send({
+          ok: false,
+          error: 'ports_unavailable',
+          ports: portCollisions
+        });
+      }
 
       const id = desktopId(alloc.display);
       const createdAt = nowMs();
@@ -773,6 +877,15 @@ export async function startServer() {
   await fs.access(config.systemctlBin, fsConstants.X_OK);
 
   const app = buildApp();
+  if (config.ttlSweepIntervalMs > 0) {
+    const timer = setInterval(() => {
+      void sweepExpiredDesktops(app);
+    }, config.ttlSweepIntervalMs);
+    timer.unref();
+    app.addHook('onClose', async () => {
+      clearInterval(timer);
+    });
+  }
   await app.listen({ host: config.host, port: config.port });
   app.log.info(
     { host: config.host, port: config.port },

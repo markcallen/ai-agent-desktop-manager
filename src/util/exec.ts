@@ -42,7 +42,7 @@ let runner: ExecRunner = defaultExecRunner;
 export async function execCmd(
   cmd: string,
   args: string[],
-  opts?: { sudo?: boolean }
+  opts?: { sudo?: boolean; env?: Record<string, string> }
 ): Promise<ExecResult> {
   return runner(cmd, args, opts);
 }

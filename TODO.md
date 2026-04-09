@@ -2,9 +2,9 @@
 
 ## MVP hardening
 
-- [ ] Add TTL sweeper that deletes expired desktops every minute
+- [x] Add TTL sweeper that deletes expired desktops every minute
 - [ ] Add per-desktop “idle” tracking using ai-agent-browser heartbeat (optional)
-- [ ] Add structured logging with request ids
+- [x] Add structured logging with request ids
 
 ## Nginx routing
 
@@ -15,17 +15,17 @@
 ## Orchestration
 
 - [ ] Add “restart desktop” endpoint that restarts all units in order
-- [ ] Add port collision detection via `ss -lnt`
+- [x] Add port collision detection via `ss -lnt`
 
 ## Agent skill integration
 
-- [ ] Add MCP server wrapper exposing tools:
+- [x] Add MCP server wrapper exposing tools:
   - desktop.create
   - desktop.list
   - desktop.get
   - desktop.destroy
   - desktop.doctor
-- [ ] Add tool docs for Claude/Codex configuration
+- [x] Add tool docs for Claude/Codex configuration
 
 ## Testing
 
@@ -42,9 +42,9 @@
 
 ## Security
 
-- [ ] Optional bearer auth for manager API (env-controlled)
-- [ ] Redaction of secrets in logs (URLs, tokens)
-- [ ] Add “allowed startUrl domains” allowlist option
+- [x] Optional bearer auth for manager API (env-controlled)
+- [x] Redaction of secrets in logs (URLs, tokens)
+- [x] Add “allowed startUrl domains” allowlist option
 
 ## Web auth
 

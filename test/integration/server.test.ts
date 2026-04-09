@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 
 type ExecCall = { cmd: string; args: string[]; sudo: boolean };
@@ -12,6 +13,7 @@ let calls: ExecCall[] = [];
 let failNginxTest = false;
 let tmpRoot = '';
 let saveFailuresRemaining = 0;
+let loggerOutput = '';
 
 const authHeaders = { authorization: 'Bearer test-token' };
 
@@ -19,11 +21,18 @@ async function importServerWithEnv() {
   tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aadm-integration-'));
   const stateDir = path.join(tmpRoot, 'state');
   const nginxDir = path.join(tmpRoot, 'nginx');
+  const loggerStream = new PassThrough();
+  loggerOutput = '';
+  loggerStream.setEncoding('utf8');
+  loggerStream.on('data', (chunk) => {
+    loggerOutput += chunk;
+  });
 
   const execMod = await import('../../src/util/exec.ts');
   const configMod = await import('../../src/util/config.ts');
   const netMod = await import('../../src/util/net.ts');
   configMod.config.authToken = 'test-token';
+  configMod.config.ttlSweepIntervalMs = 60_000;
   configMod.config.desktopRouteAuthMode = 'none';
   configMod.config.desktopRouteAuthRequestUrl = 'http://127.0.0.1:3001/verify';
   configMod.config.desktopRouteAuthRequestHeaders = [
@@ -32,6 +41,7 @@ async function importServerWithEnv() {
   ];
   configMod.config.desktopRouteTokenSecret = 'test-secret';
   configMod.config.desktopRouteTokenTtlSeconds = 900;
+  configMod.config.allowedStartUrlDomains = [];
   configMod.config.stateDir = stateDir;
   configMod.config.nginxSnippetDir = nginxDir;
   configMod.config.publicBaseUrl = 'https://host.example.com';
@@ -77,10 +87,10 @@ async function importServerWithEnv() {
   });
 
   const serverMod = await import('../../src/server.ts');
-  app = serverMod.buildApp();
+  app = serverMod.buildApp({ loggerStream });
   await app.ready();
 
-  return { execMod, netMod };
+  return { execMod, netMod, serverMod, configMod };
 }
 
 test.before(async () => {
@@ -141,6 +151,7 @@ test(
     assert.equal(create.statusCode, 200);
     const created = create.json();
     assert.equal(created.id, 'desk-1');
+    assert.ok(create.headers['x-request-id']);
     assert.equal(
       created.novncUrl,
       'https://host.example.com/desktop/1/vnc.html?path=desktop%2F1%2Fwebsockify&resize=remote&autoconnect=1'
@@ -446,5 +457,167 @@ test(
     );
     assert.ok(stopCalls.length >= 1);
     assert.ok(startCalls.length >= 4);
+  }
+);
+
+test(
+  'ttl sweep deletes only desktops whose expiresAt has elapsed',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+    const serverMod = await import('../../src/server.ts');
+
+    const before = await app.inject({
+      method: 'GET',
+      url: '/v1/desktops',
+      headers: authHeaders
+    });
+    const beforeIds = before
+      .json()
+      .desktops.map((desktop: { id: string }) => desktop.id);
+
+    const ttlCreate = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      payload: { owner: 'codex', label: 'ttl', ttlMinutes: 1 }
+    });
+    assert.equal(ttlCreate.statusCode, 200);
+    const ttlId = ttlCreate.json().id;
+
+    const noTtlCreate = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      payload: { owner: 'codex', label: 'no-ttl' }
+    });
+    assert.equal(noTtlCreate.statusCode, 200);
+    const noTtlId = noTtlCreate.json().id;
+
+    const sweep = await serverMod.sweepExpiredDesktops(
+      app,
+      Date.now() + 61_000
+    );
+    assert.deepEqual(sweep.deleted, [ttlId]);
+    assert.deepEqual(sweep.failed, []);
+
+    const after = await app.inject({
+      method: 'GET',
+      url: '/v1/desktops',
+      headers: authHeaders
+    });
+    const afterIds = after
+      .json()
+      .desktops.map((desktop: { id: string }) => desktop.id);
+    assert.deepEqual(
+      afterIds,
+      [...beforeIds, noTtlId],
+      'only ttl-backed desktop should be removed by the sweep'
+    );
+  }
+);
+
+test(
+  'startUrl allowlist rejects unapproved domains',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+    const configMod = await import('../../src/util/config.ts');
+    configMod.config.allowedStartUrlDomains = ['github.com'];
+
+    const denied = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      payload: {
+        owner: 'codex',
+        label: 'blocked',
+        startUrl: 'https://example.com'
+      }
+    });
+    assert.equal(denied.statusCode, 400);
+    assert.equal(denied.json().error, 'start_url_not_allowed');
+
+    const allowed = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      payload: {
+        owner: 'codex',
+        label: 'allowed',
+        startUrl: 'https://gist.github.com/mark'
+      }
+    });
+    assert.equal(allowed.statusCode, 200);
+
+    configMod.config.allowedStartUrlDomains = [];
+  }
+);
+
+test(
+  'create rejects port collisions discovered via ss',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+    calls = [];
+    const before = await app.inject({
+      method: 'GET',
+      url: '/v1/desktops',
+      headers: authHeaders
+    });
+    const nextDisplay = before.json().desktops.length + 1;
+    const nextVncPort = 5900 + nextDisplay;
+
+    const execMod = await import('../../src/util/exec.ts');
+    execMod.setExecRunner(async (cmd, args, opts) => {
+      calls.push({ cmd, args, sudo: Boolean(opts?.sudo) });
+
+      if (cmd === 'ss' && args[0] === '-lntH') {
+        return {
+          code: 0,
+          stdout: `LISTEN 0 128 127.0.0.1:${nextVncPort} 0.0.0.0:*\n`,
+          stderr: ''
+        };
+      }
+
+      if (cmd.endsWith('systemctl') && args[0] === 'is-active') {
+        return { code: 0, stdout: 'active\n', stderr: '' };
+      }
+
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      payload: { owner: 'codex', label: 'collision' }
+    });
+    assert.equal(create.statusCode, 409);
+    assert.equal(create.json().error, 'ports_unavailable');
+    assert.deepEqual(create.json().ports, [nextVncPort]);
+  }
+);
+
+test(
+  'request logging redacts token query params and sensitive headers',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/_aadm/access/desk-1?token=top-secret',
+      headers: { authorization: 'Bearer super-secret' }
+    });
+
+    assert.equal(response.statusCode, 404);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.match(
+      loggerOutput,
+      /"url":"\/_aadm\/access\/desk-1\?token=%5BREDACTED%5D"/
+    );
+    assert.doesNotMatch(loggerOutput, /top-secret/);
+    assert.doesNotMatch(loggerOutput, /super-secret/);
   }
 );

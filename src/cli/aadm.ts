@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { argv, exit } from 'node:process';
+import { requestJson, AadmRequestError } from '../util/aadm-client.js';
 
 type Cmd = 'create' | 'list' | 'get' | 'destroy' | 'doctor' | 'access-url';
 
@@ -9,37 +10,11 @@ function arg(name: string) {
   return argv[idx + 1];
 }
 
-function baseUrl() {
-  return process.env.AADM_URL ?? 'http://127.0.0.1:8899';
-}
-
-async function req(path: string, init?: RequestInit) {
-  const url = `${baseUrl()}${path}`;
-  const headers = { ...((init?.headers as Record<string, string>) || {}) };
-  const token = process.env.AADM_AUTH_TOKEN;
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(url, { ...init, headers });
-  const text = await res.text();
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = text;
-  }
-  if (!res.ok) {
-    console.error(
-      JSON.stringify({ ok: false, status: res.status, data }, null, 2)
-    );
-    exit(1);
-  }
-  return data;
-}
-
 async function main() {
   const cmd = (argv[2] as Cmd) || 'list';
 
   if (cmd === 'list') {
-    console.log(JSON.stringify(await req('/v1/desktops'), null, 2));
+    console.log(JSON.stringify(await requestJson('/v1/desktops'), null, 2));
     return;
   }
 
@@ -58,10 +33,9 @@ async function main() {
 
     console.log(
       JSON.stringify(
-        await req('/v1/desktops', {
+        await requestJson('/v1/desktops', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body)
+          body
         }),
         null,
         2
@@ -80,10 +54,9 @@ async function main() {
 
     console.log(
       JSON.stringify(
-        await req(`/v1/desktops/${id}/access-url`, {
+        await requestJson(`/v1/desktops/${id}/access-url`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body)
+          body
         }),
         null,
         2
@@ -95,7 +68,9 @@ async function main() {
   if (cmd === 'get') {
     const id = arg('--id');
     if (!id) throw new Error('missing --id');
-    console.log(JSON.stringify(await req(`/v1/desktops/${id}`), null, 2));
+    console.log(
+      JSON.stringify(await requestJson(`/v1/desktops/${id}`), null, 2)
+    );
     return;
   }
 
@@ -103,7 +78,7 @@ async function main() {
     const id = arg('--id');
     if (!id) throw new Error('missing --id');
     console.log(
-      JSON.stringify(await req(`/v1/desktops/${id}/doctor`), null, 2)
+      JSON.stringify(await requestJson(`/v1/desktops/${id}/doctor`), null, 2)
     );
     return;
   }
@@ -113,7 +88,7 @@ async function main() {
     if (!id) throw new Error('missing --id');
     console.log(
       JSON.stringify(
-        await req(`/v1/desktops/${id}`, { method: 'DELETE' }),
+        await requestJson(`/v1/desktops/${id}`, { method: 'DELETE' }),
         null,
         2
       )
@@ -128,6 +103,12 @@ async function main() {
 }
 
 main().catch((e) => {
+  if (e instanceof AadmRequestError) {
+    console.error(
+      JSON.stringify({ ok: false, status: e.status, data: e.data }, null, 2)
+    );
+    exit(1);
+  }
   console.error(String(e?.message ?? e));
   exit(1);
 });

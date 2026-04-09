@@ -131,6 +131,14 @@ test(
       headers: authHeaders
     });
     assert.equal(withAuth.statusCode, 200);
+
+    const forwardedReqId = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { ...authHeaders, 'x-request-id': 'external-req-123' }
+    });
+    assert.equal(forwardedReqId.statusCode, 200);
+    assert.equal(forwardedReqId.headers['x-request-id'], 'external-req-123');
   }
 );
 

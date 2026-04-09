@@ -161,10 +161,6 @@ function validateConfig() {
   ) {
     throw new Error('invalid_config:desktop_route_token_ttl_seconds');
   }
-
-  if (config.ttlSweepIntervalMs < 0) {
-    throw new Error('invalid_config:ttl_sweep_interval_ms');
-  }
 }
 
 validateConfig();

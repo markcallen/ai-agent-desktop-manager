@@ -1,4 +1,4 @@
-import { z } from 'zod/v4';
+import { z } from 'zod';
 import {
   AadmRequestError,
   requestJson,
@@ -13,17 +13,19 @@ type McpToolResult = {
 
 type InvokeDeps = Pick<RequestJsonOptions, 'fetchImpl' | 'baseUrl'>;
 
-const createDesktopSchema = {
+const createDesktopSchema = z.object({
   owner: z.string().optional(),
   label: z.string().optional(),
   ttlMinutes: z.number().int().positive().optional(),
   startUrl: z.string().url().optional(),
   routeAuthMode: z.enum(['inherit', 'none', 'auth_request', 'token']).optional()
-};
+});
 
-const idSchema = {
+const idSchema = z.object({
   id: z.string().min(1)
-};
+});
+
+const listSchema = z.object({});
 
 export const desktopToolDefinitions = [
   {
@@ -34,7 +36,7 @@ export const desktopToolDefinitions = [
   {
     name: 'desktop.list',
     description: 'List all managed desktops.',
-    inputSchema: {}
+    inputSchema: listSchema
   },
   {
     name: 'desktop.get',
@@ -105,6 +107,16 @@ function errorResult(error: unknown): McpToolResult {
   };
 }
 
+function validatedArgs<T extends z.ZodTypeAny>(schema: T, args: unknown) {
+  const parsed = schema.safeParse(args);
+  if (!parsed.success) {
+    throw new Error(
+      `invalid_arguments:${parsed.error.issues.map((issue) => issue.message).join(', ')}`
+    );
+  }
+  return parsed.data;
+}
+
 export async function invokeDesktopTool(
   name: (typeof desktopToolDefinitions)[number]['name'],
   args: Record<string, unknown> = {},
@@ -112,31 +124,38 @@ export async function invokeDesktopTool(
 ) {
   try {
     switch (name) {
-      case 'desktop.create':
+      case 'desktop.create': {
+        const body = validatedArgs(createDesktopSchema, args);
         return successResult(
           await requestJson('/v1/desktops', {
             method: 'POST',
-            body: args,
+            body,
             ...deps
           })
         );
+      }
       case 'desktop.list':
+        validatedArgs(listSchema, args);
         return successResult(await requestJson('/v1/desktops', deps));
-      case 'desktop.get':
+      case 'desktop.get': {
+        const { id } = validatedArgs(idSchema, args);
+        return successResult(await requestJson(`/v1/desktops/${id}`, deps));
+      }
+      case 'desktop.destroy': {
+        const { id } = validatedArgs(idSchema, args);
         return successResult(
-          await requestJson(`/v1/desktops/${String(args.id)}`, deps)
-        );
-      case 'desktop.destroy':
-        return successResult(
-          await requestJson(`/v1/desktops/${String(args.id)}`, {
+          await requestJson(`/v1/desktops/${id}`, {
             method: 'DELETE',
             ...deps
           })
         );
-      case 'desktop.doctor':
+      }
+      case 'desktop.doctor': {
+        const { id } = validatedArgs(idSchema, args);
         return successResult(
-          await requestJson(`/v1/desktops/${String(args.id)}/doctor`, deps)
+          await requestJson(`/v1/desktops/${id}/doctor`, deps)
         );
+      }
       default:
         throw new Error(`unknown_tool:${String(name)}`);
     }

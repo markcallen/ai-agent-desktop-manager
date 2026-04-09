@@ -1,8 +1,7 @@
-import crypto from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 
 const REDACTED = '[REDACTED]';
-const REQUEST_ID_HEADER = 'x-request-id';
+export const REQUEST_ID_HEADER = 'x-request-id';
 
 function redactSensitiveQueryParams(url: string) {
   try {
@@ -84,13 +83,6 @@ export function buildLoggerOptions(stream?: NodeJS.WritableStream) {
           stack: error.stack ?? ''
         };
       }
-    },
-    genReqId(req: { headers: Record<string, unknown> }) {
-      const incoming = req.headers[REQUEST_ID_HEADER];
-      if (typeof incoming === 'string' && incoming.trim()) {
-        return incoming.trim();
-      }
-      return crypto.randomUUID();
     }
   };
 }

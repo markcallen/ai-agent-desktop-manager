@@ -4,6 +4,7 @@ import lockfile from 'proper-lockfile';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
+import crypto from 'node:crypto';
 
 import { config } from './util/config.js';
 import { authHook } from './util/auth.js';
@@ -33,7 +34,11 @@ import {
 import { CreateAccessUrlBody, CreateDesktopBody } from './api/types.js';
 import { isPortOpen } from './util/net.js';
 import { appVersion } from './util/app-version.js';
-import { buildLoggerOptions, attachRequestIdHeader } from './util/logging.js';
+import {
+  buildLoggerOptions,
+  attachRequestIdHeader,
+  REQUEST_ID_HEADER
+} from './util/logging.js';
 import {
   createDesktopAccessToken,
   desktopAccessCookieName,
@@ -328,6 +333,14 @@ type BuildAppOptions = {
   loggerStream?: NodeJS.WritableStream;
 };
 
+function genReqId(req: { headers: Record<string, unknown> }) {
+  const incoming = req.headers[REQUEST_ID_HEADER];
+  if (typeof incoming === 'string' && incoming.trim()) {
+    return incoming.trim();
+  }
+  return crypto.randomUUID();
+}
+
 function authHeadersForInternalRequest() {
   if (!config.authToken) return undefined;
   return { authorization: `Bearer ${config.authToken}` };
@@ -382,6 +395,7 @@ export async function sweepExpiredDesktops(
 export function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({
     logger: buildLoggerOptions(options.loggerStream) as never,
+    genReqId,
     requestIdHeader: 'x-request-id',
     disableRequestLogging: false
   }) as unknown as FastifyInstance;

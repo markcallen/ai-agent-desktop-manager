@@ -1,14 +1,21 @@
-function normalizeAllowedDomain(value: string) {
+function normalizeAllowedDomain(value: string): string | undefined {
   const normalized = value.trim().toLowerCase();
   if (!normalized) return undefined;
   return normalized.replace(/^\*\./, '');
 }
 
-export function parseStartUrlDomainAllowlist(raw: string | undefined) {
+export function parseStartUrlDomainAllowlist(
+  raw: string | undefined
+): string[] {
   if (!raw) return [];
 
   return [
-    ...new Set(raw.split(',').map(normalizeAllowedDomain).filter(Boolean))
+    ...new Set(
+      raw
+        .split(',')
+        .map(normalizeAllowedDomain)
+        .filter((domain): domain is string => domain !== undefined)
+    )
   ];
 }
 

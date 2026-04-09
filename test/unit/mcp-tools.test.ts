@@ -43,3 +43,22 @@ test('desktop.get reports manager errors without throwing', async () => {
     data: { ok: false, error: 'not_found' }
   });
 });
+
+test('desktop.get rejects missing ids before calling the manager API', async () => {
+  let called = false;
+
+  const result = await invokeDesktopTool(
+    'desktop.get',
+    {},
+    {
+      fetchImpl: async () => {
+        called = true;
+        return jsonResponse(200, {});
+      }
+    }
+  );
+
+  assert.equal(called, false);
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /invalid_arguments/i);
+});

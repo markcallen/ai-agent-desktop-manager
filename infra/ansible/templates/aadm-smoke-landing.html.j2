@@ -110,7 +110,7 @@
       <article class="card">
         <h2>Smoke Host</h2>
         <p class="label">TLS host</p>
-        <p><code>{{ aadm_tls_domain if aadm_tls_domain | length > 0 else inventory_hostname }}</code></p>
+        <p><code>{{ (aadm_tls_domain if aadm_tls_domain | length > 0 else inventory_hostname) | e }}</code></p>
         <p class="label">Manager API</p>
         <p><code>http://127.0.0.1:8899</code> (host-local)</p>
       </article>
@@ -119,7 +119,7 @@
         <h2>Quick Links</h2>
         <ul>
           <li><a href="/vnc.html">Role noVNC desktop (:1)</a></li>
-          <li><a href="/desktop/2/">Manager desktop route (display 2)</a></li>
+          <li><code>/desktop/&lt;display&gt;/</code> (discover display via <code>aadm list</code>)</li>
           <li>Manager health is host-local: <code>curl -s http://127.0.0.1:8899/health | jq</code></li>
         </ul>
       </article>

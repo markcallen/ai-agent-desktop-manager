@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ai-agent-desktop smoke host</title>
+  <style>
+    :root {
+      --bg-a: #f4f8ff;
+      --bg-b: #e8fff5;
+      --ink: #0f172a;
+      --muted: #475569;
+      --accent: #0f766e;
+      --card: #ffffff;
+      --border: #dbe5f0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 0 0, #d9ecff 0, transparent 40%),
+        radial-gradient(circle at 100% 100%, #cdf7dd 0, transparent 45%),
+        linear-gradient(120deg, var(--bg-a), var(--bg-b));
+      min-height: 100vh;
+      padding: 32px 16px;
+    }
+
+    .page {
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: clamp(1.8rem, 3vw, 2.6rem);
+      margin: 0 0 8px;
+      letter-spacing: -0.03em;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin: 0 0 24px;
+      max-width: 64ch;
+    }
+
+    .cards {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+    }
+
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 1.05rem;
+      color: #0b3a58;
+    }
+
+    .label {
+      color: var(--muted);
+      margin: 0 0 4px;
+      font-size: 0.9rem;
+    }
+
+    code {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+    }
+
+    a {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    li + li {
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1>ai-agent-desktop smoke host</h1>
+    <p class="subtitle">
+      This root page is intentionally owned by <code>ai-agent-desktop-manager</code>.
+      noVNC still serves desktop sessions at per-desktop routes under <code>/desktop/&lt;display&gt;/</code>.
+    </p>
+
+    <section class="cards">
+      <article class="card">
+        <h2>Smoke Host</h2>
+        <p class="label">TLS host</p>
+        <p><code>{{ aadm_tls_domain if aadm_tls_domain | length > 0 else inventory_hostname }}</code></p>
+        <p class="label">Manager API</p>
+        <p><code>http://127.0.0.1:8899</code> (host-local)</p>
+      </article>
+
+      <article class="card">
+        <h2>Quick Links</h2>
+        <ul>
+          <li><a href="/vnc.html">Role noVNC desktop (:1)</a></li>
+          <li><a href="/desktop/2/">Manager desktop route (display 2)</a></li>
+          <li>Manager health is host-local: <code>curl -s http://127.0.0.1:8899/health | jq</code></li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <h2>How to Access Managed Desktops</h2>
+        <ul>
+          <li>Create a desktop with <code>aadm create ... --route-auth-mode token</code>.</li>
+          <li>Mint a browser URL with <code>aadm access-url --id desk-2</code>.</li>
+          <li>Open the returned URL; it sets an auth cookie and redirects to noVNC.</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

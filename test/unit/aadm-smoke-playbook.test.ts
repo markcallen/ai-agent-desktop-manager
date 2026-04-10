@@ -59,6 +59,19 @@ test('smoke playbook rewrites novnc nginx cert paths to letsencrypt', () => {
   assert.match(playbook, /ssl_certificate_key\s+\{\{ aadm_tls_key_path \}\};/);
 });
 
+test('smoke playbook overrides the noVNC root landing page', () => {
+  const playbook = fs.readFileSync(playbookPath, 'utf8');
+
+  assert.match(
+    playbook,
+    /Replace noVNC root landing page with aadm smoke page[\s\S]*dest:\s+\/usr\/share\/novnc\/index\.html/
+  );
+  assert.match(
+    playbook,
+    /src:\s+'\{\{ playbook_dir \}\}\/\.\.\/templates\/aadm-smoke-landing\.html\.j2'/
+  );
+});
+
 test('smoke playbook coerces desktop lifecycle flags to booleans', () => {
   const playbook = fs.readFileSync(playbookPath, 'utf8');
 

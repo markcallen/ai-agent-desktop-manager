@@ -2,7 +2,14 @@
 import { argv, exit } from 'node:process';
 import { requestJson, AadmRequestError } from '../util/aadm-client.js';
 
-type Cmd = 'create' | 'list' | 'get' | 'destroy' | 'doctor' | 'access-url';
+type Cmd =
+  | 'create'
+  | 'list'
+  | 'get'
+  | 'destroy'
+  | 'doctor'
+  | 'access-url'
+  | 'terminal-access';
 
 function arg(name: string) {
   const idx = argv.indexOf(name);
@@ -65,6 +72,27 @@ async function main() {
     return;
   }
 
+  if (cmd === 'terminal-access') {
+    const id = arg('--id');
+    const ttlSeconds = arg('--ttl-seconds');
+    if (!id) throw new Error('missing --id');
+
+    const body: Record<string, unknown> = {};
+    if (ttlSeconds) body.ttlSeconds = Number(ttlSeconds);
+
+    console.log(
+      JSON.stringify(
+        await requestJson(`/v1/desktops/${id}/terminal-access`, {
+          method: 'POST',
+          body
+        }),
+        null,
+        2
+      )
+    );
+    return;
+  }
+
   if (cmd === 'get') {
     const id = arg('--id');
     if (!id) throw new Error('missing --id');
@@ -97,7 +125,7 @@ async function main() {
   }
 
   console.error(
-    'Unknown command. Use: create|list|get|doctor|destroy|access-url'
+    'Unknown command. Use: create|list|get|doctor|destroy|access-url|terminal-access'
   );
   exit(2);
 }

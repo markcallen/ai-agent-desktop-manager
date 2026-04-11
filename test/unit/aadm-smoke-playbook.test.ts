@@ -44,6 +44,13 @@ test('smoke playbook waits for desktop ports using display-min offset math', () 
   );
 });
 
+test('smoke playbook reserves :1 for role noVNC and starts managed desktops at :2', () => {
+  const playbook = fs.readFileSync(playbookPath, 'utf8');
+
+  assert.match(playbook, /vnc_display:\s*1/);
+  assert.match(playbook, /AADM_DISPLAY_MIN=2/);
+});
+
 test('smoke playbook uses accessUrl from the manager response', () => {
   const playbook = fs.readFileSync(playbookPath, 'utf8');
 
@@ -77,4 +84,10 @@ test('smoke playbook coerces desktop lifecycle flags to booleans', () => {
 
   assert.match(playbook, /when: aadm_smoke_create_desktop \| bool/);
   assert.match(playbook, /- aadm_smoke_destroy_desktop \| bool/);
+});
+
+test('smoke playbook installs tmux for the terminal workspace', () => {
+  const playbook = fs.readFileSync(playbookPath, 'utf8');
+
+  assert.match(playbook, /- tmux/);
 });

@@ -11,8 +11,9 @@
 
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import { chromium } from 'playwright';
-import type { BrowserContext } from 'playwright-core';
+import type { BrowserContext, Page } from 'playwright-core';
 import { maybeEnterPassword } from '../../smoke/browser-smoke.mjs';
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,7 @@ const PUBLIC_BASE_URL = (process.env.SMOKE_PUBLIC_BASE_URL ?? '').replace(
   /\/$/,
   ''
 );
+const SMOKE_SUMMARY_PATH = process.env.SMOKE_SUMMARY_PATH ?? '';
 const SMOKE_ACCESS_URL = process.env.SMOKE_ACCESS_URL ?? '';
 const VNC_PASSWORD = process.env.SMOKE_VNC_PASSWORD ?? 'SmokePassw0rd!';
 
@@ -90,6 +92,57 @@ async function withBrowser<T>(
   }
 }
 
+async function desktopFrame(page: Page) {
+  const frameHandle = await page
+    .waitForSelector('iframe[data-aadm-desktop-frame]', {
+      timeout: 5000,
+      state: 'attached'
+    })
+    .catch(() => null);
+
+  return (await frameHandle?.contentFrame()) ?? null;
+}
+
+async function canvasDimensions(page: Page) {
+  const frame = await desktopFrame(page);
+  const target = frame ?? page;
+  return await target.evaluate(() => {
+    const c = document.querySelector('canvas');
+    return c ? { w: c.width, h: c.height } : null;
+  });
+}
+
+async function expectTerminalReady(page: Page) {
+  await page.waitForSelector('#terminal-mount');
+  await page.waitForSelector('#agent-terminal-mount');
+  await page.waitForFunction(
+    () => {
+      const status = document.querySelector('#terminal-status');
+      if (!(status instanceof HTMLElement)) return false;
+      const text = status.textContent ?? '';
+      return (
+        !/failed to load|connection failed|closed/i.test(text) &&
+        /attached to tmux session|connected to tmux session/i.test(text) &&
+        Boolean(document.querySelector('#terminal-mount .xterm')) &&
+        Boolean(document.querySelector('#agent-terminal-mount .xterm'))
+      );
+    },
+    undefined,
+    { timeout: 30000 }
+  );
+}
+
+async function loadSmokeSummary(): Promise<Record<string, unknown> | null> {
+  if (!SMOKE_SUMMARY_PATH) return null;
+
+  try {
+    const raw = await fs.readFile(SMOKE_SUMMARY_PATH, 'utf8');
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Created desktop IDs — cleaned up by after() hook on any test failure
 // ---------------------------------------------------------------------------
@@ -133,6 +186,51 @@ before(async () => {
     );
   }
 });
+
+test(
+  'smoke host keeps role noVNC on :1 and seeds managed desktop as desk-2',
+  { skip: SKIP ? SKIP_REASON : false, timeout: 180_000 },
+  async () => {
+    const summary = await loadSmokeSummary();
+    assert.ok(summary, 'smoke summary is available');
+
+    const created = summary.create as
+      | { id?: string; display?: number; routeAuth?: { mode?: string } }
+      | undefined;
+    assert.equal(created?.id, 'desk-2');
+    assert.equal(created?.display, 2);
+    assert.equal(created?.routeAuth?.mode, 'token');
+
+    const accessUrl = String(summary.accessUrl ?? '');
+    assert.match(
+      accessUrl,
+      /^https:\/\/.+\/desktop\/2\/access\?token=/,
+      'summary access URL points at managed desktop 2'
+    );
+
+    await withBrowser(async (ctx) => {
+      const page = await ctx.newPage();
+      await page.goto(
+        `${PUBLIC_BASE_URL}/vnc.html?autoconnect=1&resize=remote`,
+        {
+          waitUntil: 'domcontentloaded',
+          timeout: 30_000
+        }
+      );
+
+      await maybeEnterPassword(page, VNC_PASSWORD);
+
+      const dims = await page.evaluate(() => {
+        const c = document.querySelector('canvas');
+        return c ? { w: c.width, h: c.height } : null;
+      });
+      assert.ok(
+        dims && dims.w > 0 && dims.h > 0,
+        `root noVNC desktop rendered ${JSON.stringify(dims)}`
+      );
+    });
+  }
+);
 
 // ---------------------------------------------------------------------------
 // 1. Health endpoint
@@ -378,7 +476,7 @@ test(
 
     // --- browser: token flow → canvas ---
     await t.test(
-      'browser: accessUrl redirects to noVNC, canvas renders',
+      'browser: accessUrl loads shell and embedded canvas renders',
       { timeout: 180_000 },
       async () => {
         const freshRes = await api(
@@ -395,11 +493,13 @@ test(
             timeout: 30_000
           });
 
-          // After following the 302, we should be on vnc.html
           assert.ok(
-            page.url().includes('/vnc.html'),
-            `expected redirect to vnc.html, got ${page.url()}`
+            page.url().endsWith(`/desktop/${desktop.display}/`),
+            `expected redirect to shell route, got ${page.url()}`
           );
+          await page.waitForSelector('iframe[data-aadm-desktop-frame]');
+          await page.waitForSelector('#terminal-mount');
+          await expectTerminalReady(page);
 
           // Cookie must be set with the correct path
           const cookies = await ctx.cookies();
@@ -414,10 +514,7 @@ test(
 
           await maybeEnterPassword(page, VNC_PASSWORD);
 
-          const dims = await page.evaluate(() => {
-            const c = document.querySelector('canvas');
-            return c ? { w: c.width, h: c.height } : null;
-          });
+          const dims = await canvasDimensions(page);
           assert.ok(
             dims && dims.w > 0 && dims.h > 0,
             `canvas rendered ${JSON.stringify(dims)}`
@@ -490,16 +587,16 @@ test(
       });
 
       assert.ok(
-        page.url().includes('/vnc.html'),
-        `expected redirect to vnc.html, got ${page.url()}`
+        page.url().includes('/desktop/2/'),
+        `expected shell route, got ${page.url()}`
       );
+      await page.waitForSelector('iframe[data-aadm-desktop-frame]');
+      await page.waitForSelector('#terminal-mount');
+      await expectTerminalReady(page);
 
       await maybeEnterPassword(page, VNC_PASSWORD);
 
-      const dims = await page.evaluate(() => {
-        const c = document.querySelector('canvas');
-        return c ? { w: c.width, h: c.height } : null;
-      });
+      const dims = await canvasDimensions(page);
       assert.ok(
         dims && dims.w > 0 && dims.h > 0,
         `canvas rendered ${JSON.stringify(dims)}`

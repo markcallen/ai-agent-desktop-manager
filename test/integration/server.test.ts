@@ -43,6 +43,8 @@ async function importServerWithEnv() {
   configMod.config.desktopRouteTokenTtlSeconds = 900;
   configMod.config.allowedStartUrlDomains = [];
   configMod.config.stateDir = stateDir;
+  configMod.config.workspaceRootDir = path.join(stateDir, 'workspaces');
+  configMod.config.tmuxConfPath = path.join(stateDir, 'tmux.conf');
   configMod.config.nginxSnippetDir = nginxDir;
   configMod.config.publicBaseUrl = 'https://host.example.com';
   netMod.setPortChecker(async () => true);
@@ -164,6 +166,12 @@ test(
       created.novncUrl,
       'https://host.example.com/desktop/1/vnc.html?path=desktop%2F1%2Fwebsockify&resize=remote&autoconnect=1'
     );
+    assert.deepEqual(created.terminal, {
+      sessionName: 'aadm-desk-1',
+      workspaceDir: path.join(stateDirFromTmpRoot(), 'workspaces', 'desk-1'),
+      websocketPath: '/desktop/1/terminal/ws',
+      websocketUrl: 'wss://host.example.com/desktop/1/terminal/ws'
+    });
 
     const doctor = await app.inject({
       method: 'GET',
@@ -176,11 +184,61 @@ test(
     assert.equal(body.ok, true);
     assert.equal(body.checks.nginx.snippetExists, true);
     assert.equal(body.checks.nginx.protected, false);
+    assert.equal(body.checks.terminal.tmuxSession, true);
     assert.equal(body.checks.ports.vnc, true);
     assert.equal(body.checks.ports.websockify, true);
     assert.equal(body.checks.ports.cdp, true);
     assert.equal(body.checks.ports.aab, true);
     assert.deepEqual(body.routeAuth, { mode: 'none' });
+  }
+);
+
+test(
+  'terminal-access endpoint returns terminal metadata and token bootstrap details',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      payload: {
+        owner: 'codex',
+        label: 'terminal-token',
+        routeAuthMode: 'token'
+      }
+    });
+    assert.equal(create.statusCode, 200);
+
+    const terminal = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops/desk-2/terminal-access',
+      headers: authHeaders
+    });
+    assert.equal(terminal.statusCode, 200);
+    assert.deepEqual(terminal.json(), {
+      id: 'desk-2',
+      routeAuth: {
+        mode: 'token',
+        token: {
+          ttlSeconds: 900
+        }
+      },
+      terminal: {
+        sessionName: 'aadm-desk-2',
+        workspaceDir: path.join(stateDirFromTmpRoot(), 'workspaces', 'desk-2'),
+        websocketPath: '/desktop/2/terminal/ws',
+        websocketUrl: 'wss://host.example.com/desktop/2/terminal/ws'
+      },
+      accessUrl: terminal.json().accessUrl,
+      accessUrlExpiresAt: terminal.json().accessUrlExpiresAt
+    });
+    assert.match(
+      terminal.json().accessUrl,
+      /^https:\/\/host\.example\.com\/desktop\/2\/access\?token=/
+    );
+    assert.equal(typeof terminal.json().accessUrlExpiresAt, 'number');
   }
 );
 
@@ -212,7 +270,7 @@ test(
 
     const getDesktop = await app.inject({
       method: 'GET',
-      url: '/v1/desktops/desk-2',
+      url: '/v1/desktops/desk-3',
       headers: authHeaders
     });
     assert.equal(getDesktop.statusCode, 200);
@@ -220,19 +278,23 @@ test(
 
     const doctor = await app.inject({
       method: 'GET',
-      url: '/v1/desktops/desk-2/doctor',
+      url: '/v1/desktops/desk-3/doctor',
       headers: authHeaders
     });
     assert.equal(doctor.statusCode, 200);
     assert.equal(doctor.json().checks.nginx.protected, true);
     assert.equal(doctor.json().routeAuth.mode, 'auth_request');
 
-    const snippetPath = path.join(tmpRoot, 'nginx', 'desk-2.conf');
+    const snippetPath = path.join(tmpRoot, 'nginx', 'desk-3.conf');
     const snippet = await fs.readFile(snippetPath, 'utf-8');
-    assert.match(snippet, /auth_request \/_aadm\/auth\/desk-2;/);
+    assert.match(snippet, /auth_request \/_aadm\/auth\/desk-3;/);
     assert.match(snippet, /proxy_pass http:\/\/127\.0\.0\.1:3001\/verify;/);
   }
 );
+
+function stateDirFromTmpRoot() {
+  return path.join(tmpRoot, 'state');
+}
 
 test(
   'create with token route protection returns a secure access url and verifier endpoints honor it',
@@ -260,28 +322,28 @@ test(
     });
     assert.match(
       create.json().accessUrl,
-      /^https:\/\/host\.example\.com\/desktop\/3\/access\?token=/
+      /^https:\/\/host\.example\.com\/desktop\/4\/access\?token=/
     );
 
     const returnedAccessUrl = new URL(create.json().accessUrl);
     const access = await app.inject({
       method: 'GET',
-      url: `/_aadm/access/desk-3${returnedAccessUrl.search}`
+      url: `/_aadm/access/desk-4${returnedAccessUrl.search}`
     });
     assert.equal(access.statusCode, 302);
-    assert.match(access.headers.location, /^\/desktop\/3\/vnc\.html\?/);
+    assert.equal(access.headers.location, '/desktop/4/');
     assert.match(access.headers['set-cookie'] ?? '', /HttpOnly/);
     assert.match(access.headers['set-cookie'] ?? '', /Secure/);
 
     const verifyDenied = await app.inject({
       method: 'GET',
-      url: '/_aadm/verify/desk-3'
+      url: '/_aadm/verify/desk-4'
     });
     assert.equal(verifyDenied.statusCode, 401);
 
     const verifyAllowed = await app.inject({
       method: 'GET',
-      url: '/_aadm/verify/desk-3',
+      url: '/_aadm/verify/desk-4',
       headers: {
         cookie: String(access.headers['set-cookie']).split(';')[0]
       }
@@ -290,23 +352,126 @@ test(
 
     const minted = await app.inject({
       method: 'POST',
-      url: '/v1/desktops/desk-3/access-url',
+      url: '/v1/desktops/desk-4/access-url',
       headers: { ...authHeaders, 'content-type': 'application/json' },
       payload: { ttlSeconds: 120 }
     });
     assert.equal(minted.statusCode, 200);
     assert.match(
       minted.json().accessUrl,
-      /^https:\/\/host\.example\.com\/desktop\/3\/access\?token=/
+      /^https:\/\/host\.example\.com\/desktop\/4\/access\?token=/
     );
 
-    const snippetPath = path.join(tmpRoot, 'nginx', 'desk-3.conf');
+    const snippetPath = path.join(tmpRoot, 'nginx', 'desk-4.conf');
     const snippet = await fs.readFile(snippetPath, 'utf-8');
     assert.match(
       snippet,
-      /proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/verify\/desk-3;/
+      /proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/verify\/desk-4;/
     );
-    assert.match(snippet, /location = \/desktop\/3\/access/);
+    assert.match(snippet, /location = \/desktop\/4\/access/);
+  }
+);
+
+test(
+  'desktop shell route returns terminal-enabled HTML for a managed desktop',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/desktops',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      payload: {
+        owner: 'codex',
+        label: 'shell',
+        routeAuthMode: 'token'
+      }
+    });
+    assert.equal(create.statusCode, 200);
+    const created = create.json();
+
+    const shell = await app.inject({
+      method: 'GET',
+      url: `/_aadm/desktop/${created.id}`
+    });
+    assert.equal(shell.statusCode, 200);
+    assert.match(
+      String(shell.headers['content-type']),
+      /^text\/html; charset=utf-8/
+    );
+    assert.match(shell.body, /data-aadm-desktop-frame/);
+    assert.match(shell.body, /\/_aadm\/assets\/xterm\.css/);
+    assert.match(shell.body, /\/_aadm\/assets\/xterm\.js/);
+    assert.match(shell.body, /\/_aadm\/assets\/addon-fit\.js/);
+    assert.match(shell.body, /id="terminal-mount"/);
+    assert.match(shell.body, /id="agent-terminal-mount"/);
+    assert.match(shell.body, /AI Agent/);
+    assert.match(
+      shell.body,
+      new RegExp(
+        `/desktop/${created.display}/vnc\\.html\\?path=desktop/${created.display}/websockify`
+      )
+    );
+    assert.match(
+      shell.body,
+      new RegExp(
+        `wss://host\\.example\\.com/desktop/${created.display}/terminal/ws`
+      )
+    );
+    assert.match(
+      shell.body,
+      new RegExp(
+        `wss://host\\.example\\.com/desktop/${created.display}/bridge/ws`
+      )
+    );
+    assert.match(shell.body, /Bridge not configured on this host\./);
+    assert.doesNotMatch(shell.body, /cdn\.jsdelivr\.net/);
+    assert.doesNotMatch(shell.body, /id="terminal-command"/);
+    assert.doesNotMatch(shell.body, /id="terminal-output"/);
+    assert.match(shell.body, /Attached to tmux session/);
+  }
+);
+
+test(
+  'desktop shell advertises bridge availability when ai-agent-bridge is configured',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+    const configMod = await import('../../src/util/config.ts');
+    const previousBridgeAddr = configMod.config.bridgeAddr;
+    configMod.config.bridgeAddr = '127.0.0.1:9445';
+
+    try {
+      const create = await app.inject({
+        method: 'POST',
+        url: '/v1/desktops',
+        headers: { ...authHeaders, 'content-type': 'application/json' },
+        payload: {
+          owner: 'codex',
+          label: 'bridge-shell',
+          routeAuthMode: 'token'
+        }
+      });
+      assert.equal(create.statusCode, 200);
+      const created = create.json();
+
+      const shell = await app.inject({
+        method: 'GET',
+        url: `/_aadm/desktop/${created.id}`
+      });
+      assert.equal(shell.statusCode, 200);
+      assert.match(
+        shell.body,
+        /Bridge available\. Start a session to attach the agent terminal\./
+      );
+      assert.match(shell.body, /id="agent-start"/);
+      assert.match(shell.body, /id="agent-stop"/);
+      assert.match(shell.body, /id="agent-provider"/);
+      assert.match(shell.body, new RegExp(`"enabled":true`));
+    } finally {
+      configMod.config.bridgeAddr = previousBridgeAddr;
+    }
   }
 );
 

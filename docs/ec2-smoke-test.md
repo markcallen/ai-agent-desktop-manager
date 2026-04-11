@@ -87,6 +87,7 @@ Inspect it:
 ```bash
 aadm list
 aadm doctor --id desk-1
+aadm terminal-access --id desk-1
 ```
 
 Destroy it:
@@ -113,6 +114,8 @@ Send JavaScript and keep following console output:
 ```bash
 aab-console eval 'console.log(window.location.href)' --follow
 ```
+
+The terminal workspace is tmux-backed. After desktop creation, the manager creates a workspace directory under `/opt/ai-agent-desktop-manager/data/workspaces/<desktop-id>` and a tmux session named `aadm-<desktop-id>`. The browser access URL now lands on the manager-owned desktop shell at `/desktop/<display>/`, and that shell connects its terminal pane through the public websocket path `/desktop/<display>/terminal/ws` while presenting the URL as a copyable field.
 
 Capture a screenshot through `ai-agent-browser`:
 

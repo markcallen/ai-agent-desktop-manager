@@ -62,6 +62,7 @@
           - python3
           - python3-apt
           - rsync
+          - tmux
           - wmctrl
           - xauth
           - xfonts-base
@@ -340,6 +341,7 @@
           AADM_PUBLIC_BASE_URL={{ aadm_public_base_url }}
           AADM_NGINX_SNIPPET_DIR={{ aadm_nginx_snippet_dir }}
           AADM_STATE_DIR={{ aadm_state_dir }}
+          AADM_WORKSPACE_ROOT_DIR={{ aadm_state_dir }}/workspaces
           AADM_DISPLAY_MIN=2
           AADM_DISPLAY_MAX=11
           AADM_WEBSOCKIFY_PORT_MIN=6081
@@ -514,6 +516,7 @@
           - '  aadm create --owner smoke --label first --ttl 60 --start-url https://example.com'
           - '  aadm create --owner smoke --label protected --route-auth-mode token'
           - '  aadm access-url --id desk-1'
+          - '  aadm terminal-access --id desk-1'
           - '  aadm list'
           - '  aadm doctor --id desk-1'
           - '  aadm destroy --id desk-1'

@@ -362,7 +362,7 @@ run_ansible() {
 
   mkdir -p "$ANSIBLE_ROLES_DIR"
   ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
-  ansible-galaxy role install -r "$ANSIBLE_REQUIREMENTS" -p "$ANSIBLE_ROLES_DIR"
+  ansible-galaxy role install --force -r "$ANSIBLE_REQUIREMENTS" -p "$ANSIBLE_ROLES_DIR"
   ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
   ansible-galaxy collection install -r "$ANSIBLE_REQUIREMENTS"
 

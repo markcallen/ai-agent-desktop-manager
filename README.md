@@ -320,6 +320,12 @@ This repo uses **systemd template units** per desktop:
 - `chrome@.service`
 - `aab@.service` (ai-agent-browser)
 
+Each desktop also gets a managed tmux workspace owned by the manager:
+
+- workspace dir: `AADM_WORKSPACE_ROOT_DIR/<desktop-id>`
+- tmux session: `aadm-<desktop-id>`
+- websocket path: `/desktop/<display>/terminal/ws`
+
 Ports are derived from display and `.env` minima:
 
 - `wsPort  = AADM_WEBSOCKIFY_PORT_MIN + (display - AADM_DISPLAY_MIN)`
@@ -380,6 +386,7 @@ curl -s http://127.0.0.1:8899/v1/desktops/desk-3/doctor | jq
 Doctor reports:
 
 - systemd status for VNC/websockify/chrome/aab
+- tmux session status for the terminal workspace
 - Nginx snippet path + existence
 - whether the generated desktop route is protected
 - port checks for VNC/websockify/CDP/AAB
@@ -390,6 +397,23 @@ Doctor reports:
 ```bash
 curl -sX DELETE http://127.0.0.1:8899/v1/desktops/desk-3 | jq
 ```
+
+### Terminal Access
+
+Each desktop response now includes:
+
+- `terminal.sessionName`
+- `terminal.workspaceDir`
+- `terminal.websocketPath`
+- `terminal.websocketUrl`
+
+You can also request terminal access details explicitly:
+
+```bash
+curl -sX POST http://127.0.0.1:8899/v1/desktops/desk-3/terminal-access | jq
+```
+
+In `token` route-auth mode this returns the same desktop bootstrap `accessUrl` plus the terminal websocket URL. Opening that `accessUrl` now lands on the manager-owned desktop shell at `/desktop/<display>/`, where noVNC and the tmux-backed terminal are presented together. The shell shows the terminal websocket as a copyable URL field, and the websocket itself is still exposed through nginx at `/desktop/<display>/terminal/ws`.
 
 ---
 
@@ -424,6 +448,7 @@ This repo includes a small CLI `aadm`:
 npm run cli -- create --owner codex --label work --ttl 90 --start-url https://github.com
 npm run cli -- create --owner codex --label private --route-auth-mode token
 npm run cli -- access-url --id desk-3
+npm run cli -- terminal-access --id desk-3
 npm run cli -- list
 npm run cli -- destroy --id desk-3
 ```

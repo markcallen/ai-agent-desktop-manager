@@ -3,7 +3,12 @@ import { config } from './config.js';
 
 export async function authHook(req: FastifyRequest, reply: FastifyReply) {
   const url = req.raw.url ?? '';
-  if (url.startsWith('/_aadm/access/') || url.startsWith('/_aadm/verify/')) {
+  if (
+    url.startsWith('/_aadm/access/') ||
+    url.startsWith('/_aadm/verify/') ||
+    url.startsWith('/_aadm/desktop/') ||
+    url.startsWith('/_aadm/assets/')
+  ) {
     return;
   }
 

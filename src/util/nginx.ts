@@ -7,6 +7,8 @@ import {
   normalizeForwardedHeaderName,
   type DesktopRouteAuth
 } from './route-auth.js';
+import { managerBridgeWebsocketPath } from './bridge.js';
+import { managerTerminalWebsocketPath } from './terminal.js';
 
 export function snippetFilename(desktopId: string) {
   return path.join(config.nginxSnippetDir, `${desktopId}.conf`);
@@ -83,6 +85,27 @@ function buildTokenAccessLocation(desktopId: string, display: number) {
 `;
 }
 
+function buildDesktopShellLocation(
+  desktopId: string,
+  display: number,
+  routeAuth: DesktopRouteAuth
+) {
+  const prefix = config.novncPathPrefix.replace(/\/$/, '');
+  const loc = `${prefix}/${display}/`;
+  const authLine =
+    routeAuth.mode === 'auth_request' || routeAuth.mode === 'token'
+      ? `  auth_request ${authRequestLocation(desktopId)};\n`
+      : '';
+
+  return `location = ${loc} {
+${authLine}  proxy_pass ${managerBaseUrl()}/_aadm/desktop/${desktopId};
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+`;
+}
+
 export function buildSnippet(
   desktopId: string,
   display: number,
@@ -91,30 +114,15 @@ export function buildSnippet(
 ) {
   const prefix = config.novncPathPrefix.replace(/\/$/, '');
   const loc = `${prefix}/${display}/`;
-  const query = `path=${prefix.replace(/^\//, '')}/${display}/websockify&resize=remote&autoconnect=1`;
   const authLine =
     routeAuth.mode === 'auth_request' || routeAuth.mode === 'token'
       ? `  auth_request ${authRequestLocation(desktopId)};\n`
       : '';
-  // Redirect the bare desktop path to noVNC's HTML entrypoint.
-  // Protected routes proxy directly to vnc.html so auth_request runs on the entry request.
-  const entryLocation =
-    routeAuth.mode === 'auth_request'
-      ? `location = ${loc} {
-${authLine}  proxy_pass http://127.0.0.1:${wsPort}/vnc.html?${query};
-  proxy_http_version 1.1;
-  proxy_set_header Upgrade $http_upgrade;
-  proxy_set_header Connection "upgrade";
-  proxy_read_timeout 7d;
-  proxy_send_timeout 7d;
-}
-
-`
-      : `location = ${loc} {
-  return 302 ${loc}vnc.html?${query};
-}
-
-`;
+  const shellLocation = buildDesktopShellLocation(
+    desktopId,
+    display,
+    routeAuth
+  );
 
   // Trailing slash in proxy_pass avoids path issues with noVNC assets.
   const routePrelude =
@@ -123,8 +131,28 @@ ${authLine}  proxy_pass http://127.0.0.1:${wsPort}/vnc.html?${query};
       : routeAuth.mode === 'token'
         ? `${buildTokenAuthBlock(desktopId)}${buildTokenAccessLocation(desktopId, display)}`
         : '';
+  const terminalLocation = `location = ${loc}terminal/ws {
+${authLine}  proxy_pass http://127.0.0.1:${config.port}${managerTerminalWebsocketPath(desktopId)};
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_read_timeout 7d;
+  proxy_send_timeout 7d;
+}
 
-  return `${routePrelude}${entryLocation}location ${loc} {
+`;
+  const bridgeLocation = `location = ${loc}bridge/ws {
+${authLine}  proxy_pass http://127.0.0.1:${config.port}${managerBridgeWebsocketPath(desktopId)};
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_read_timeout 7d;
+  proxy_send_timeout 7d;
+}
+
+`;
+
+  return `${routePrelude}${shellLocation}${terminalLocation}${bridgeLocation}location ${loc} {
 ${authLine}  proxy_pass http://127.0.0.1:${wsPort}/;
   proxy_http_version 1.1;
   proxy_set_header Upgrade $http_upgrade;

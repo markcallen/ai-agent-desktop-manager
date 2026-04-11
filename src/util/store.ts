@@ -5,6 +5,12 @@ import {
   normalizeDesktopRouteAuth,
   type DesktopRouteAuth
 } from './route-auth.js';
+import {
+  buildTerminalWebsocketPath,
+  buildTerminalWebsocketUrl,
+  desktopWorkspaceDir,
+  terminalSessionName
+} from './terminal.js';
 
 export type DesktopRecord = {
   id: string;
@@ -21,6 +27,10 @@ export type DesktopRecord = {
   aabPort: number;
   novncUrl: string;
   aabUrl: string;
+  workspaceDir: string;
+  terminalSessionName: string;
+  terminalWebsocketPath: string;
+  terminalWebsocketUrl: string;
   startUrl?: string;
   routeAuth: DesktopRouteAuth;
 };
@@ -56,6 +66,32 @@ export async function loadState(): Promise<State> {
         (desktop): DesktopRecord =>
           ({
             ...(desktop as DesktopRecord),
+            workspaceDir:
+              typeof desktop.workspaceDir === 'string' && desktop.workspaceDir
+                ? desktop.workspaceDir
+                : desktopWorkspaceDir(String(desktop.id ?? '')),
+            terminalSessionName:
+              typeof desktop.terminalSessionName === 'string' &&
+              desktop.terminalSessionName
+                ? desktop.terminalSessionName
+                : terminalSessionName(String(desktop.id ?? '')),
+            terminalWebsocketPath:
+              typeof desktop.terminalWebsocketPath === 'string' &&
+              desktop.terminalWebsocketPath
+                ? desktop.terminalWebsocketPath
+                : buildTerminalWebsocketPath(
+                    config.novncPathPrefix,
+                    Number(desktop.display ?? 0)
+                  ),
+            terminalWebsocketUrl:
+              typeof desktop.terminalWebsocketUrl === 'string' &&
+              desktop.terminalWebsocketUrl
+                ? desktop.terminalWebsocketUrl
+                : buildTerminalWebsocketUrl(
+                    config.publicBaseUrl,
+                    config.novncPathPrefix,
+                    Number(desktop.display ?? 0)
+                  ),
             routeAuth: normalizeDesktopRouteAuth(desktop.routeAuth) ?? {
               mode: 'none'
             }

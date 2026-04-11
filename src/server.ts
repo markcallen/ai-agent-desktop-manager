@@ -5,6 +5,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import crypto from 'node:crypto';
+import type { WebSocket as WsWebSocket } from 'ws';
 
 import { config } from './util/config.js';
 import { authHook } from './util/auth.js';
@@ -48,6 +49,21 @@ import {
 } from './util/route-auth.js';
 import { findPortCollisions } from './util/port-usage.js';
 import { isStartUrlAllowed } from './util/start-url.js';
+import {
+  desktopWorkspaceDir,
+  ensureTmuxSession,
+  ensureWorkspaceDir,
+  isTmuxSessionActive,
+  killTmuxSession,
+  resizeTmuxSession,
+  terminalMetadataForDesktop,
+  terminalSessionName
+} from './util/terminal.js';
+import { acceptWebSocket } from './util/websocket.js';
+import { createTerminalAttachProcess } from './util/terminal-pty.js';
+import { buildDesktopShellHtml } from './util/desktop-shell.js';
+import { loadTerminalAsset } from './util/terminal-assets.js';
+import { buildBridgeHandler } from './util/bridge.js';
 
 function desktopId(display: number) {
   return `desk-${display}`;
@@ -64,23 +80,27 @@ function novncUrlFor(display: number) {
   return `${base}${prefix}/${display}/vnc.html?${params.toString()}`;
 }
 
-function novncRelativeUrlFor(display: number) {
-  const prefix = config.novncPathPrefix.replace(/\/$/, '');
-  const params = new URLSearchParams({
-    path: `${prefix.replace(/^\//, '')}/${display}/websockify`,
-    resize: 'remote',
-    autoconnect: '1'
-  });
-  return `${prefix}/${display}/vnc.html?${params.toString()}`;
-}
-
 function desktopAccessPathFor(display: number) {
   const prefix = config.novncPathPrefix.replace(/\/$/, '');
   return `${prefix}/${display}/access`;
 }
 
+function desktopShellRelativeUrlFor(display: number) {
+  const prefix = config.novncPathPrefix.replace(/\/$/, '');
+  return `${prefix}/${display}/`;
+}
+
 function aabUrlFor(port: number) {
   return `http://127.0.0.1:${port}`;
+}
+
+function terminalFor(
+  desktop: Pick<
+    DesktopRecord,
+    'id' | 'display' | 'workspaceDir' | 'terminalSessionName'
+  >
+) {
+  return terminalMetadataForDesktop(desktop);
 }
 
 function parseCookieValue(rawCookieHeader: string | undefined, name: string) {
@@ -293,13 +313,18 @@ async function restoreSnippetAndReload(
 }
 
 async function rollbackCreatedDesktop(
-  desktop: Pick<DesktopRecord, 'id' | 'display'>,
+  desktop: Pick<DesktopRecord, 'id' | 'display' | 'terminalSessionName'>,
   snippetWritten: boolean,
   log: { warn: (obj: unknown, msg: string) => void }
 ) {
   const issues: string[] = [];
   if (snippetWritten) {
     issues.push(...(await removeSnippetAndReload(desktop.id, log)));
+  }
+
+  const terminalStop = await killTmuxSession(desktop.terminalSessionName);
+  if (!terminalStop.ok) {
+    issues.push(`terminal stop failed during rollback: ${terminalStop.error}`);
   }
 
   const stopRes = await stopUnits(desktop.display, log);
@@ -314,6 +339,18 @@ async function restoreDestroyedDesktop(
   log: { warn: (obj: unknown, msg: string) => void }
 ) {
   const issues: string[] = [];
+  try {
+    await ensureWorkspaceDir(desktop.workspaceDir);
+    await ensureTmuxSession(desktop.terminalSessionName, desktop.workspaceDir);
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
+    issues.push(`terminal restore failed: ${msg}`);
+    log.warn(
+      { err: e, desktopId: desktop.id },
+      'failed to restore terminal session'
+    );
+  }
+
   try {
     await startUnits(desktop.display, log);
   } catch (e) {
@@ -399,9 +436,149 @@ export function buildApp(options: BuildAppOptions = {}) {
     requestIdHeader: 'x-request-id',
     disableRequestLogging: false
   }) as unknown as FastifyInstance;
+  const bridgeHandler = buildBridgeHandler();
   app.addHook('preHandler', authHook);
   app.addHook('onRequest', async (req, reply) => {
     attachRequestIdHeader(reply, req.log, req.id);
+  });
+  app.server.on('upgrade', (req, socket, head) => {
+    const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
+    const match = /^\/_aadm\/terminal\/([^/]+)\/ws$/.exec(requestUrl.pathname);
+    const bridgeMatch = /^\/_aadm\/bridge\/([^/]+)\/ws$/.exec(
+      requestUrl.pathname
+    );
+    if (!match && !bridgeMatch) {
+      socket.destroy();
+      return;
+    }
+
+    if (bridgeMatch) {
+      if (!bridgeHandler) {
+        socket.write('HTTP/1.1 501 Not Implemented\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      const desktopId = bridgeMatch[1];
+      void (async () => {
+        const st = await loadState();
+        const desktop = st.desktops.find((entry) => entry.id === desktopId);
+        if (!desktop) {
+          socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        bridgeHandler.handleUpgrade(req, socket, head, (ws: WsWebSocket) => {
+          bridgeHandler.emit('connection', ws, req);
+        });
+      })().catch(() => {
+        socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+        socket.destroy();
+      });
+      return;
+    }
+
+    const desktopId = match?.[1];
+    if (!desktopId) {
+      socket.destroy();
+      return;
+    }
+    void (async () => {
+      const st = await loadState();
+      const desktop = st.desktops.find((entry) => entry.id === desktopId);
+      if (!desktop) {
+        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      const cols = Math.max(
+        1,
+        Number.parseInt(requestUrl.searchParams.get('cols') ?? '120', 10) || 120
+      );
+      const rows = Math.max(
+        1,
+        Number.parseInt(requestUrl.searchParams.get('rows') ?? '40', 10) || 40
+      );
+
+      const terminalProcess = createTerminalAttachProcess({
+        sessionName: desktop.terminalSessionName,
+        cols,
+        rows
+      });
+
+      const ws = acceptWebSocket(req, socket, {
+        onMessage(message) {
+          try {
+            const parsed = JSON.parse(message) as
+              | { type?: string; data?: string; cols?: number; rows?: number }
+              | undefined;
+            if (!parsed || typeof parsed.type !== 'string') return;
+
+            if (parsed.type === 'input' && typeof parsed.data === 'string') {
+              terminalProcess.stdin.write(parsed.data);
+              return;
+            }
+
+            if (
+              parsed.type === 'resize' &&
+              Number.isInteger(parsed.cols) &&
+              Number.isInteger(parsed.rows)
+            ) {
+              void resizeTmuxSession(
+                desktop.terminalSessionName,
+                Number(parsed.cols),
+                Number(parsed.rows)
+              );
+            }
+          } catch {
+            // ignore invalid messages
+          }
+        },
+        onClose() {
+          terminalProcess.kill('SIGTERM');
+        }
+      });
+
+      if (!ws) return;
+
+      ws.sendJson({
+        type: 'ready',
+        desktopId: desktop.id,
+        terminal: terminalFor(desktop)
+      });
+
+      terminalProcess.stdout.on('data', (chunk) => {
+        ws.sendJson({
+          type: 'output',
+          data: Buffer.from(chunk).toString('base64')
+        });
+      });
+      terminalProcess.stderr.on('data', (chunk) => {
+        ws.sendJson({
+          type: 'output',
+          data: Buffer.from(chunk).toString('base64')
+        });
+      });
+      terminalProcess.on('close', (code) => {
+        ws.sendJson({
+          type: 'exit',
+          code: code ?? 0
+        });
+        ws.close();
+      });
+      terminalProcess.on('error', (error) => {
+        ws.sendJson({
+          type: 'error',
+          error: error.message
+        });
+        ws.close();
+      });
+    })().catch(() => {
+      socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+      socket.destroy();
+    });
   });
 
   app.get('/health', async () => {
@@ -473,6 +650,48 @@ export function buildApp(options: BuildAppOptions = {}) {
     };
   });
 
+  app.post('/v1/desktops/:id/terminal-access', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const parsed = CreateAccessUrlBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        ok: false,
+        error: 'invalid_body',
+        details: parsed.error.flatten()
+      });
+    }
+
+    const st = await loadState();
+    const d = st.desktops.find((desktop) => desktop.id === id);
+    if (!d) return reply.code(404).send({ ok: false, error: 'not_found' });
+
+    const requestedTtlSeconds = parsed.data.ttlSeconds;
+    if (
+      d.routeAuth.mode === 'token' &&
+      requestedTtlSeconds &&
+      requestedTtlSeconds > config.desktopRouteTokenTtlSeconds
+    ) {
+      return reply.code(400).send({
+        ok: false,
+        error: 'ttl_seconds_too_large',
+        maxTtlSeconds: config.desktopRouteTokenTtlSeconds
+      });
+    }
+
+    const access = mintDesktopAccessUrl(d, requestedTtlSeconds);
+    return {
+      id: d.id,
+      routeAuth: d.routeAuth,
+      terminal: terminalFor(d),
+      ...(access
+        ? {
+            accessUrl: access.accessUrl,
+            accessUrlExpiresAt: access.expiresAt
+          }
+        : {})
+    };
+  });
+
   app.get('/_aadm/access/:id', async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const query = req.query as Record<string, string | undefined>;
@@ -501,7 +720,30 @@ export function buildApp(options: BuildAppOptions = {}) {
       'set-cookie',
       buildDesktopAccessCookie(d, token, verified.expiresAt)
     );
-    return reply.redirect(novncRelativeUrlFor(d.display));
+    return reply.redirect(desktopShellRelativeUrlFor(d.display));
+  });
+
+  app.get('/_aadm/desktop/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const st = await loadState();
+    const d = st.desktops.find((desktop) => desktop.id === id);
+    if (!d) return reply.code(404).send({ ok: false, error: 'not_found' });
+
+    reply.type('text/html; charset=utf-8');
+    reply.header('cache-control', 'no-store');
+    return buildDesktopShellHtml(d);
+  });
+
+  app.get('/_aadm/assets/:name', async (req, reply) => {
+    const name = (req.params as { name: string }).name;
+    const asset = await loadTerminalAsset(name);
+    if (!asset) {
+      return reply.code(404).send({ ok: false, error: 'not_found' });
+    }
+
+    reply.type(asset.contentType);
+    reply.header('cache-control', 'public, max-age=3600');
+    return reply.send(asset.body);
   });
 
   app.get('/_aadm/verify/:id', async (req, reply) => {
@@ -576,6 +818,8 @@ export function buildApp(options: BuildAppOptions = {}) {
       }
 
       const id = desktopId(alloc.display);
+      const workspaceDir = desktopWorkspaceDir(id);
+      const tmuxSession = terminalSessionName(id);
       const createdAt = nowMs();
       const ttlMinutes = parsed.data.ttlMinutes;
       const expiresAt = ttlMinutes
@@ -610,6 +854,20 @@ export function buildApp(options: BuildAppOptions = {}) {
         aabPort: alloc.aabPort,
         novncUrl,
         aabUrl,
+        workspaceDir,
+        terminalSessionName: tmuxSession,
+        terminalWebsocketPath: terminalFor({
+          id,
+          display: alloc.display,
+          workspaceDir,
+          terminalSessionName: tmuxSession
+        }).websocketPath,
+        terminalWebsocketUrl: terminalFor({
+          id,
+          display: alloc.display,
+          workspaceDir,
+          terminalSessionName: tmuxSession
+        }).websocketUrl,
         startUrl: parsed.data.startUrl,
         routeAuth
       };
@@ -621,6 +879,18 @@ export function buildApp(options: BuildAppOptions = {}) {
         return reply.code(500).send({
           ok: false,
           error: 'failed_start_units',
+          details: String((e as Error)?.message ?? e)
+        });
+      }
+
+      try {
+        await ensureWorkspaceDir(workspaceDir);
+        await ensureTmuxSession(tmuxSession, workspaceDir);
+      } catch (e) {
+        await stopUnits(alloc.display, app.log);
+        return reply.code(500).send({
+          ok: false,
+          error: 'terminal_init_failed',
           details: String((e as Error)?.message ?? e)
         });
       }
@@ -657,6 +927,7 @@ export function buildApp(options: BuildAppOptions = {}) {
             );
           }
         }
+        await killTmuxSession(tmuxSession);
         await stopUnits(alloc.display, app.log);
         return reply.code(500).send({
           ok: false,
@@ -691,6 +962,7 @@ export function buildApp(options: BuildAppOptions = {}) {
         display: record.display,
         novncUrl: record.novncUrl,
         aabUrl: record.aabUrl,
+        terminal: terminalFor(record),
         cdp: { host: '127.0.0.1', port: record.cdpPort },
         status: record.status,
         routeAuth: record.routeAuth,
@@ -716,6 +988,7 @@ export function buildApp(options: BuildAppOptions = {}) {
       const d = st.desktops[idx];
 
       const stopRes = await stopUnits(d.display, app.log);
+      const terminalStop = await killTmuxSession(d.terminalSessionName);
 
       let nginxIssue: string | undefined;
       try {
@@ -745,6 +1018,7 @@ export function buildApp(options: BuildAppOptions = {}) {
           details: String((e as Error)?.message ?? e),
           warnings: {
             stopErrors: stopRes.errors,
+            terminalIssue: terminalStop.ok ? undefined : terminalStop.error,
             nginxIssue,
             restoreIssues
           }
@@ -755,6 +1029,7 @@ export function buildApp(options: BuildAppOptions = {}) {
         ok: true,
         warnings: {
           stopErrors: stopRes.errors,
+          terminalIssue: terminalStop.ok ? undefined : terminalStop.error,
           nginxIssue
         }
       };
@@ -777,6 +1052,7 @@ export function buildApp(options: BuildAppOptions = {}) {
       aWs,
       aChrome,
       aAab,
+      tmuxSessionActive,
       vncPortOpen,
       wsPortOpen,
       cdpPortOpen,
@@ -786,6 +1062,7 @@ export function buildApp(options: BuildAppOptions = {}) {
       systemctlIsActive(uWs),
       systemctlIsActive(uChrome),
       systemctlIsActive(uAab),
+      isTmuxSessionActive(d.terminalSessionName),
       isPortOpen('127.0.0.1', d.vncPort),
       isPortOpen('127.0.0.1', d.wsPort),
       isPortOpen('127.0.0.1', d.cdpPort),
@@ -808,6 +1085,9 @@ export function buildApp(options: BuildAppOptions = {}) {
         chrome: aChrome.code === 0,
         aab: aAab.code === 0
       },
+      terminal: {
+        tmuxSession: tmuxSessionActive
+      },
       ports: {
         vnc: vncPortOpen,
         websockify: wsPortOpen,
@@ -826,6 +1106,7 @@ export function buildApp(options: BuildAppOptions = {}) {
         checks.services.websockify &&
         checks.services.chrome &&
         checks.services.aab &&
+        checks.terminal.tmuxSession &&
         checks.ports.vnc &&
         checks.ports.websockify &&
         checks.ports.cdp &&
@@ -862,7 +1143,8 @@ export function buildApp(options: BuildAppOptions = {}) {
       },
       links: {
         novncUrl: d.novncUrl,
-        aabUrl: d.aabUrl
+        aabUrl: d.aabUrl,
+        terminalWebsocketUrl: d.terminalWebsocketUrl
       }
     };
   });
@@ -873,8 +1155,11 @@ export function buildApp(options: BuildAppOptions = {}) {
 export async function startServer() {
   await fs.mkdir(config.nginxSnippetDir, { recursive: true });
   await fs.mkdir(getStateDir(), { recursive: true });
+  await fs.mkdir(config.workspaceRootDir, { recursive: true });
   await fs.access(config.nginxBin, fsConstants.X_OK);
   await fs.access(config.systemctlBin, fsConstants.X_OK);
+  await fs.access(config.tmuxBin, fsConstants.X_OK);
+  await fs.access(config.scriptBin, fsConstants.X_OK);
 
   const app = buildApp();
   if (config.ttlSweepIntervalMs > 0) {

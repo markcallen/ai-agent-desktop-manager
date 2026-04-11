@@ -68,7 +68,8 @@ export function buildConnectUrl(rawUrl) {
 }
 
 export async function waitForCanvas(page) {
-  await page.waitForFunction(
+  const target = await resolveNoVncContext(page);
+  await target.waitForFunction(
     () => {
       const canvas = document.querySelector('canvas');
       return Boolean(canvas && canvas.width > 0 && canvas.height > 0);
@@ -78,15 +79,32 @@ export async function waitForCanvas(page) {
   );
 }
 
+async function resolveNoVncContext(page) {
+  const frameHandle = await page
+    .waitForSelector('iframe[data-aadm-desktop-frame]', {
+      timeout: 5000,
+      state: 'attached'
+    })
+    .catch(() => null);
+
+  if (!frameHandle) {
+    return page;
+  }
+
+  const frame = await frameHandle.contentFrame();
+  return frame ?? page;
+}
+
 export async function maybeEnterPassword(page, vncPassword) {
+  const target = await resolveNoVncContext(page);
   if (!vncPassword) {
     await waitForCanvas(page);
     return;
   }
 
-  await page.waitForTimeout(5000);
+  await target.waitForTimeout(5000);
 
-  await page.waitForFunction(
+  await target.waitForFunction(
     () => {
       const canvas = document.querySelector('canvas');
       if (canvas && canvas.width > 0 && canvas.height > 0) {
@@ -103,7 +121,7 @@ export async function maybeEnterPassword(page, vncPassword) {
     { timeout: 120000 }
   );
 
-  const connected = await page.evaluate(() => {
+  const connected = await target.evaluate(() => {
     const canvas = document.querySelector('canvas');
     return Boolean(canvas && canvas.width > 0 && canvas.height > 0);
   });
@@ -113,7 +131,7 @@ export async function maybeEnterPassword(page, vncPassword) {
   }
 
   const submitCredentials = async () =>
-    page.evaluate((password) => {
+    target.evaluate((password) => {
       const passwordInput =
         document.querySelector('#noVNC_password') ||
         document.querySelector('#noVNC_password_input') ||
@@ -151,7 +169,7 @@ export async function maybeEnterPassword(page, vncPassword) {
     }, vncPassword);
 
   await submitCredentials();
-  await page.waitForTimeout(5000);
+  await target.waitForTimeout(5000);
   await waitForCanvas(page);
 }
 

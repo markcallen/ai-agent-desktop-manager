@@ -31,7 +31,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prettier": "prettier . --check",
-    "prettier:fix": "prettier . --write"
+    "prettier:fix": "prettier . --write",
+    "smoke:destroy": "./scripts/ec2-smoke-test.sh destroy"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.3",

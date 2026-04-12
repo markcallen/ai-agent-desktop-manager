@@ -350,6 +350,7 @@
           AADM_CDP_PORT_MAX=9231
           AADM_AAB_PORT_MIN=8765
           AADM_AAB_PORT_MAX=8774
+          AADM_BRIDGE_ADDR=http://127.0.0.1:8765
           AADM_NGINX_BIN=/usr/sbin/nginx
           AADM_SYSTEMCTL_BIN=/bin/systemctl
           AADM_UNIT_VNC=vnc@

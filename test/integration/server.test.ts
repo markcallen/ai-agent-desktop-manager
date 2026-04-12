@@ -401,9 +401,18 @@ test(
       /^text\/html; charset=utf-8/
     );
     assert.match(shell.body, /data-aadm-desktop-frame/);
-    assert.match(shell.body, /\/_aadm\/assets\/xterm\.css/);
-    assert.match(shell.body, /\/_aadm\/assets\/xterm\.js/);
-    assert.match(shell.body, /\/_aadm\/assets\/addon-fit\.js/);
+    assert.match(
+      shell.body,
+      new RegExp(`/desktop/${created.display}/assets/xterm\\.css`)
+    );
+    assert.match(
+      shell.body,
+      new RegExp(`/desktop/${created.display}/assets/xterm\\.js`)
+    );
+    assert.match(
+      shell.body,
+      new RegExp(`/desktop/${created.display}/assets/addon-fit\\.js`)
+    );
     assert.match(shell.body, /id="terminal-mount"/);
     assert.match(shell.body, /id="agent-terminal-mount"/);
     assert.match(shell.body, /AI Agent/);

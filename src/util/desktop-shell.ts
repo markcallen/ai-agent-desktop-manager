@@ -29,6 +29,10 @@ function desktopIframeUrl(display: number) {
   return `${basePath}/vnc.html?path=${basePath.replace(/^\//, '')}/websockify&resize=remote&autoconnect=1`;
 }
 
+function desktopAssetUrl(display: number, assetName: string) {
+  return `${desktopShellBasePath(display)}/assets/${assetName}`;
+}
+
 export function buildDesktopShellHtml(desktop: DesktopRecord) {
   const terminal = terminalMetadataForDesktop(desktop);
   const iframeUrl = desktopIframeUrl(desktop.display);
@@ -70,7 +74,7 @@ export function buildDesktopShellHtml(desktop: DesktopRecord) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(shellTitle)} | ai-agent desktop</title>
-  <link rel="stylesheet" href="/_aadm/assets/xterm.css">
+  <link rel="stylesheet" href="${desktopAssetUrl(desktop.display, 'xterm.css')}">
   <style>
     :root {
       --bg: #0b1020;
@@ -440,8 +444,8 @@ export function buildDesktopShellHtml(desktop: DesktopRecord) {
   </main>
 
   <script id="aadm-shell-bootstrap" type="application/json">${escapeJson(bootstrap)}</script>
-  <script src="/_aadm/assets/xterm.js"></script>
-  <script src="/_aadm/assets/addon-fit.js"></script>
+  <script src="${desktopAssetUrl(desktop.display, 'xterm.js')}"></script>
+  <script src="${desktopAssetUrl(desktop.display, 'addon-fit.js')}"></script>
   <script>
     (() => {
       const bootstrap = JSON.parse(document.getElementById('aadm-shell-bootstrap').textContent || '{}');
@@ -456,6 +460,8 @@ export function buildDesktopShellHtml(desktop: DesktopRecord) {
       const agentProviderNode = document.getElementById('agent-provider');
       const agentStartButton = document.getElementById('agent-start');
       const agentStopButton = document.getElementById('agent-stop');
+      const TerminalCtor = globalThis.Terminal || window.Terminal;
+      const FitAddonCtor = globalThis.FitAddon || window.FitAddon;
 
       if (
         !statusNode ||
@@ -469,8 +475,8 @@ export function buildDesktopShellHtml(desktop: DesktopRecord) {
         !agentProviderNode ||
         !agentStartButton ||
         !agentStopButton ||
-        !window.Terminal ||
-        !window.FitAddon
+        !TerminalCtor ||
+        !FitAddonCtor
       ) {
         if (statusNode) {
           statusNode.textContent = 'Terminal runtime failed to load.';
@@ -507,7 +513,7 @@ export function buildDesktopShellHtml(desktop: DesktopRecord) {
       };
 
       const createTerminalView = (container) => {
-        const term = new window.Terminal({
+        const term = new TerminalCtor({
           theme: terminalTheme,
           fontFamily: '"Cascadia Code", "Fira Code", Menlo, monospace',
           fontSize: 14,
@@ -516,7 +522,7 @@ export function buildDesktopShellHtml(desktop: DesktopRecord) {
           scrollback: 5000,
           allowProposedApi: true
         });
-        const fitAddon = new window.FitAddon.FitAddon();
+        const fitAddon = new FitAddonCtor.FitAddon();
         term.loadAddon(fitAddon);
         term.open(container);
         fitAddon.fit();

@@ -236,6 +236,42 @@ Notes:
 - `npm run smoke:playwright-test:status` reprints the saved SSH, health, noVNC, and destroy commands for the active smoke stack.
 - `npm run smoke:playwright-test:existing` still targets an already-provisioned smoke host by calling `./scripts/smoke-playwright.sh --test`.
 
+### Smoke Test Workflow
+
+Create a local smoke env file once:
+
+```bash
+cp .env.smoke.example .env.smoke.local
+```
+
+Set at least these values in `.env.smoke.local`:
+
+```bash
+SMOKE_AWS_REGION=us-east-2
+SMOKE_TLS_DOMAIN=smoke.markcallen.dev
+SMOKE_TLS_EMAIL=ops@example.com
+```
+
+Then use the smoke commands like this:
+
+```bash
+# Provision EC2, run the smoke test, always destroy the stack.
+npm run test:smoke
+
+# Provision EC2, run the smoke test, keep the stack alive for debugging.
+npm run test:smoke:debug
+
+# Reprint the saved SSH, health, noVNC, and destroy commands for the current stack.
+npm run smoke:playwright-test:status
+
+# Re-run the Playwright assertion against the existing keep-alive smoke host.
+npm run smoke:playwright-test:existing
+```
+
+The smoke npm scripts load `.env.smoke.local` automatically. If that file is missing, they fall back to `.env.smoke`.
+
+When you rerun the keep-alive flow, the provisioning playbook now removes any older `smoke-test` desktops before creating the new one, so repeated debug runs do not fail with `no_free_display`.
+
 ---
 
 ## Security model (how to avoid “root Node”)

@@ -141,6 +141,14 @@ ${authLine}  proxy_pass http://127.0.0.1:${config.port}${managerTerminalWebsocke
 }
 
 `;
+  const assetLocation = `location ^~ ${loc}assets/ {
+${authLine}  rewrite ^${loc}assets/(.*)$ /_aadm/assets/$1 break;
+  proxy_pass ${managerBaseUrl()};
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+`;
   const bridgeLocation = `location = ${loc}bridge/ws {
 ${authLine}  proxy_pass http://127.0.0.1:${config.port}${managerBridgeWebsocketPath(desktopId)};
   proxy_http_version 1.1;
@@ -152,7 +160,7 @@ ${authLine}  proxy_pass http://127.0.0.1:${config.port}${managerBridgeWebsocketP
 
 `;
 
-  return `${routePrelude}${shellLocation}${terminalLocation}${bridgeLocation}location ${loc} {
+  return `${routePrelude}${shellLocation}${terminalLocation}${assetLocation}${bridgeLocation}location ${loc} {
 ${authLine}  proxy_pass http://127.0.0.1:${wsPort}/;
   proxy_http_version 1.1;
   proxy_set_header Upgrade $http_upgrade;

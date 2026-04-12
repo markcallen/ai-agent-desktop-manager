@@ -26,6 +26,7 @@
     "test": "node --import tsx --test test/**/*.test.ts",
     "test:smoke": "npm run smoke:playwright-test",
     "test:smoke:debug": "npm run smoke:playwright-test:debug",
+    "test:smoke:status": "npm run smoke:playwright-test:status",
     "test:coverage": "node --import tsx --experimental-test-coverage --test test/**/*.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

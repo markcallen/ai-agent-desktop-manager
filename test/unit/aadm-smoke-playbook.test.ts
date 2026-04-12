@@ -91,3 +91,21 @@ test('smoke playbook installs tmux for the terminal workspace', () => {
 
   assert.match(playbook, /- tmux/);
 });
+
+test('smoke playbook clears previous smoke-test desktops before creating a new one', () => {
+  const playbook = fs.readFileSync(playbookPath, 'utf8');
+
+  assert.match(
+    playbook,
+    /- name: List existing smoke desktops[\s\S]*url: http:\/\/127\.0\.0\.1:8899\/v1\/desktops[\s\S]*method: GET/
+  );
+  assert.match(
+    playbook,
+    /- name: Destroy previous smoke-test desktops[\s\S]*url: 'http:\/\/127\.0\.0\.1:8899\/v1\/desktops\/\{\{ item\.id \}\}'[\s\S]*method: DELETE/
+  );
+  assert.match(playbook, /selectattr\('owner', 'equalto', 'smoke-test'\)/);
+  assert.match(
+    playbook,
+    /- name: Create smoke desktop[\s\S]*owner: smoke-test[\s\S]*label: ubuntu-24-spot/
+  );
+});

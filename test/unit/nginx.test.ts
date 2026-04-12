@@ -24,6 +24,10 @@ test('buildSnippet generates redirect and websocket-safe location blocks', () =>
     snippet,
     /location = \/desktop\/3\/bridge\/ws \{\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/bridge\/desk-3\/ws;/
   );
+  assert.match(
+    snippet,
+    /location \^~ \/desktop\/3\/assets\/ \{\n {2}rewrite \^\/desktop\/3\/assets\/\(\.\*\)\$ \/_aadm\/assets\/\$1 break;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899;/
+  );
   assert.doesNotMatch(snippet, /auth_request/);
 });
 
@@ -61,6 +65,10 @@ test('buildSnippet can protect a route with auth_request', () => {
     snippet,
     /location = \/desktop\/3\/bridge\/ws \{\n {2}auth_request \/_aadm\/auth\/desk-3;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/bridge\/desk-3\/ws;/
   );
+  assert.match(
+    snippet,
+    /location \^~ \/desktop\/3\/assets\/ \{\n {2}auth_request \/_aadm\/auth\/desk-3;\n {2}rewrite \^\/desktop\/3\/assets\/\(\.\*\)\$ \/_aadm\/assets\/\$1 break;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899;/
+  );
 });
 
 test('buildSnippet can protect a route with manager token verification', () => {
@@ -93,5 +101,9 @@ test('buildSnippet can protect a route with manager token verification', () => {
   assert.match(
     snippet,
     /location = \/desktop\/4\/bridge\/ws \{\n {2}auth_request \/_aadm\/auth\/desk-4;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/bridge\/desk-4\/ws;/
+  );
+  assert.match(
+    snippet,
+    /location \^~ \/desktop\/4\/assets\/ \{\n {2}auth_request \/_aadm\/auth\/desk-4;\n {2}rewrite \^\/desktop\/4\/assets\/\(\.\*\)\$ \/_aadm\/assets\/\$1 break;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899;/
   );
 });

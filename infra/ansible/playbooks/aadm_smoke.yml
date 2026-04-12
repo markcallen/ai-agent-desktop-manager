@@ -413,6 +413,31 @@
       delay: 3
       until: aadm_health.status == 200
 
+    - name: List existing smoke desktops
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8899/v1/desktops
+        method: GET
+        return_content: true
+        status_code: 200
+      register: aadm_existing_desktops
+      when: aadm_smoke_create_desktop | bool
+
+    - name: Destroy previous smoke-test desktops
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:8899/v1/desktops/{{ item.id }}'
+        method: DELETE
+        return_content: true
+        status_code: 200
+      loop: >-
+        {{
+          (aadm_existing_desktops.json.desktops | default([]))
+          | selectattr('owner', 'equalto', 'smoke-test')
+          | list
+        }}
+      loop_control:
+        label: '{{ item.id }}'
+      when: aadm_smoke_create_desktop | bool
+
     - name: Create smoke desktop
       ansible.builtin.uri:
         url: http://127.0.0.1:8899/v1/desktops

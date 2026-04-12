@@ -3,6 +3,7 @@ dist
 artifacts
 data
 .env
+.env.smoke.local
 .DS_Store
 infra/smoke-test/.terraform/
 infra/smoke-test/.runtime/

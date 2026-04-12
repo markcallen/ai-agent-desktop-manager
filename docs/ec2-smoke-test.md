@@ -39,6 +39,29 @@ The smoke host now uses `novnc-openbox` release `v0.1.0` for the base noVNC/Open
 ./scripts/ec2-smoke-test.sh run --region us-west-2 --tls-domain smoke.markcallen.dev --tls-email ops@example.com
 ```
 
+If you want the project smoke test to provision and destroy EC2 automatically instead of expecting an existing smoke host, put your smoke settings in `.env.smoke.local` and run:
+
+```bash
+cp .env.smoke.example .env.smoke.local
+npm run test:smoke
+```
+
+The smoke npm scripts load `.env.smoke.local` automatically. If that file is absent, they fall back to `.env.smoke`.
+
+Example `.env.smoke.local`:
+
+```bash
+SMOKE_AWS_REGION=us-west-2
+SMOKE_TLS_DOMAIN=smoke.markcallen.dev
+SMOKE_TLS_EMAIL=ops@example.com
+```
+
+If you want the smoke host left running for debugging, use:
+
+```bash
+npm run test:smoke:debug
+```
+
 Optional flags:
 
 ```bash
@@ -141,7 +164,13 @@ Use the Playwright-style browser smoke wrapper after provisioning:
 ./scripts/smoke-playwright.sh
 ```
 
-Use `./scripts/smoke-playwright.sh --test` (or `npm run smoke:playwright-test`) to execute the same browser smoke assertion without saving a screenshot; this is the regression you want in CI.
+Use `npm run test:smoke` (or `npm run smoke:playwright-test`) to provision EC2, run the remote Playwright assertion, and destroy the stack automatically on pass or fail.
+
+Use `npm run test:smoke:debug` (or `npm run smoke:playwright-test:debug`) to provision EC2, run the remote Playwright assertion, and leave the instance running so you can debug it manually. Destroy it later with `./scripts/ec2-smoke-test.sh destroy --region <region>`.
+
+Use `npm run smoke:playwright-test:status` to reprint the saved SSH, health check, noVNC, and destroy commands for the currently provisioned smoke stack.
+
+Use `./scripts/smoke-playwright.sh --test` (or `npm run smoke:playwright-test:existing`) to execute the same browser smoke assertion against an already-provisioned smoke host without saving a screenshot.
 
 The wrapper reads the local summary file, uses a tokenized manager access URL when one is present, and stores a screenshot at `infra/smoke-test/.runtime/browser-smoke.png`.
 

@@ -231,7 +231,10 @@ Notes:
 - DNS changes must have propagated before certbot runs.
 - For repeated smoke runs, reuse the delegated zone and let Terraform rotate the per-run hostname.
 - `./scripts/ec2-smoke-test.sh run` writes `infra/smoke-test/.runtime/aadm-smoke-summary.json`, and `./scripts/smoke-playwright.sh` can replay a browser smoke test from that summary in CI or locally.
-- `npm run smoke:playwright-test` calls `./scripts/smoke-playwright.sh --test`, which loads the same summary and runs the Playwright smoke assertion instead of taking a screenshot.
+- `npm run test:smoke` and `npm run smoke:playwright-test` provision EC2, run the remote Playwright smoke assertion, and destroy the stack automatically on pass or fail. Put the smoke settings in `.env.smoke.local` first.
+- `npm run test:smoke:debug` and `npm run smoke:playwright-test:debug` leave the EC2 instance running after the smoke test so you can debug it manually.
+- `npm run smoke:playwright-test:status` reprints the saved SSH, health, noVNC, and destroy commands for the active smoke stack.
+- `npm run smoke:playwright-test:existing` still targets an already-provisioned smoke host by calling `./scripts/smoke-playwright.sh --test`.
 
 ---
 

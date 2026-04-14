@@ -1,7 +1,12 @@
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import fastifyStatic from '@fastify/static';
+import replyFrom from '@fastify/reply-from';
 import lockfile from 'proper-lockfile';
 import path from 'node:path';
+import net from 'node:net';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import crypto from 'node:crypto';
@@ -21,6 +26,7 @@ import { allocate } from './util/allocator.js';
 import {
   buildSnippet,
   writeSnippet,
+  writeGlobalSnippet,
   removeSnippet,
   nginxTest,
   nginxReload,
@@ -55,15 +61,17 @@ import {
   ensureWorkspaceDir,
   isTmuxSessionActive,
   killTmuxSession,
+  managerTerminalWebsocketPath,
   resizeTmuxSession,
   terminalMetadataForDesktop,
   terminalSessionName
 } from './util/terminal.js';
 import { acceptWebSocket } from './util/websocket.js';
 import { createTerminalAttachProcess } from './util/terminal-pty.js';
-import { buildDesktopShellHtml } from './util/desktop-shell.js';
-import { loadTerminalAsset } from './util/terminal-assets.js';
-import { buildBridgeHandler } from './util/bridge.js';
+import {
+  buildBridgeHandler,
+  managerBridgeWebsocketPath
+} from './util/bridge.js';
 
 function desktopId(display: number) {
   return `desk-${display}`;
@@ -429,6 +437,45 @@ export async function sweepExpiredDesktops(
   return { deleted, failed };
 }
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const webDistDir = path.resolve(__dirname, '../web/dist');
+const viteDevUrl = config.viteDevUrl;
+
+// One-time secret generated at startup — injected into the desktop config so
+// only the browser app (which fetched the config) can post to /_aadm/logs.
+const browserLogsToken = crypto.randomBytes(32).toString('hex');
+
+function buildDesktopConfig(d: DesktopRecord) {
+  const termPath = managerTerminalWebsocketPath(d.id);
+  const bridgePath = managerBridgeWebsocketPath(d.id);
+  const bridgeEnabled = !!config.bridgeAddr;
+
+  return {
+    desktop: {
+      id: d.id,
+      display: d.display,
+      label: d.label || d.id,
+      novncUrl: novncUrlFor(d.display)
+    },
+    terminal: {
+      websocketUrl: termPath,
+      websocketPath: termPath,
+      sessionName: terminalSessionName(d.id),
+      workspaceDir: desktopWorkspaceDir(d.id)
+    },
+    bridge: {
+      enabled: bridgeEnabled,
+      websocketUrl: bridgePath,
+      websocketPath: bridgePath,
+      workspaceDir: desktopWorkspaceDir(d.id),
+      defaultProvider: 'claude',
+      projectId: d.id
+    },
+    browserLogsToken
+  };
+}
+
 export function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({
     logger: buildLoggerOptions(options.loggerStream) as never,
@@ -441,14 +488,41 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.addHook('onRequest', async (req, reply) => {
     attachRequestIdHeader(reply, req.log, req.id);
   });
+
+  if (viteDevUrl) {
+    void app.register(replyFrom);
+  } else {
+    void app.register(fastifyStatic, {
+      root: webDistDir,
+      prefix: '/_aadm/desktop-app/'
+    });
+  }
+
   app.server.on('upgrade', (req, socket, head) => {
     const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
     const match = /^\/_aadm\/terminal\/([^/]+)\/ws$/.exec(requestUrl.pathname);
     const bridgeMatch = /^\/_aadm\/bridge\/([^/]+)\/ws$/.exec(
       requestUrl.pathname
     );
-    if (!match && !bridgeMatch) {
+    const isViteHmr = viteDevUrl && requestUrl.pathname === '/_aadm_hmr';
+
+    if (!match && !bridgeMatch && !isViteHmr) {
       socket.destroy();
+      return;
+    }
+
+    if (isViteHmr && viteDevUrl) {
+      const target = new URL(viteDevUrl);
+      const port = parseInt(target.port || '80', 10);
+      const proxySocket = net.connect(port, target.hostname);
+      const headers = Object.entries(req.headers)
+        .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+        .join('\r\n');
+      proxySocket.write(`GET /_aadm_hmr HTTP/1.1\r\n${headers}\r\n\r\n`);
+      proxySocket.pipe(socket);
+      socket.pipe(proxySocket);
+      proxySocket.on('error', () => socket.destroy());
+      socket.on('close', () => proxySocket.destroy());
       return;
     }
 
@@ -587,6 +661,90 @@ export function buildApp(options: BuildAppOptions = {}) {
       version: appVersion,
       uptimeSec: Math.floor(process.uptime())
     };
+  });
+
+  app.get('/healthz/live', async () => {
+    return { ok: true };
+  });
+
+  app.get('/healthz/ready', async (_, reply) => {
+    try {
+      await loadState();
+      return { ok: true };
+    } catch (err) {
+      reply.code(503);
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  app.get('/', async (_, reply) => {
+    const st = await loadState();
+    const hostname = os.hostname();
+    const uptimeSec = Math.floor(process.uptime());
+    const uptimeStr =
+      uptimeSec < 60
+        ? `${uptimeSec}s`
+        : uptimeSec < 3600
+          ? `${Math.floor(uptimeSec / 60)}m ${uptimeSec % 60}s`
+          : `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`;
+    const desktopRows = st.desktops
+      .map(
+        (d) =>
+          `<tr>
+            <td><code>${d.id}</code></td>
+            <td>${d.label ?? ''}</td>
+            <td>${d.owner ?? ''}</td>
+            <td><a href="/_aadm/desktop/${d.id}">open</a></td>
+          </tr>`
+      )
+      .join('\n');
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>AADM — ${hostname}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    .meta { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #e0e0e0; }
+    th { background: #f5f5f5; font-weight: 600; }
+    code { background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+    .section { margin-top: 1.5rem; }
+    .kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; }
+    .kv dt { color: #666; font-size: 0.9rem; }
+    .kv dd { margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>AI Agent Desktop Manager</h1>
+  <div class="meta">version ${appVersion} &nbsp;·&nbsp; ${hostname}</div>
+
+  <div class="section">
+    <dl class="kv">
+      <dt>Uptime</dt>        <dd>${uptimeStr}</dd>
+      <dt>Public URL</dt>    <dd><code>${config.publicBaseUrl}</code></dd>
+      <dt>Bridge</dt>        <dd>${config.bridgeAddr ? `<code>${config.bridgeAddr}</code>` : '<span style="color:#999">not configured</span>'}</dd>
+      <dt>Desktops</dt>      <dd>${st.desktops.length}</dd>
+    </dl>
+  </div>
+
+  <div class="section">
+    <h2 style="font-size:1rem">Desktops</h2>
+    ${
+      st.desktops.length === 0
+        ? '<p style="color:#999">No desktops.</p>'
+        : `<table>
+      <thead><tr><th>ID</th><th>Label</th><th>Owner</th><th></th></tr></thead>
+      <tbody>${desktopRows}</tbody>
+    </table>`
+    }
+  </div>
+</body>
+</html>`;
+    reply.type('text/html');
+    return html;
   });
 
   app.get('/v1/desktops', async () => {
@@ -729,22 +887,88 @@ export function buildApp(options: BuildAppOptions = {}) {
     const d = st.desktops.find((desktop) => desktop.id === id);
     if (!d) return reply.code(404).send({ ok: false, error: 'not_found' });
 
-    reply.type('text/html; charset=utf-8');
     reply.header('cache-control', 'no-store');
-    return buildDesktopShellHtml(d);
+    if (viteDevUrl) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (reply as any).from(`${viteDevUrl}/_aadm/desktop-app/`);
+    }
+    const indexHtml = await fs.readFile(
+      path.join(webDistDir, 'index.html'),
+      'utf-8'
+    );
+    // Inject desktop ID so the React app can identify itself even when nginx
+    // proxies /desktop/:display/ → /_aadm/desktop/:id (URL bar shows nginx path).
+    const injected = indexHtml.replace(
+      '<script',
+      `<script>window.__AADM_DESKTOP_ID__=${JSON.stringify(id)};</script><script`
+    );
+    reply.type('text/html; charset=utf-8');
+    return injected;
   });
 
-  app.get('/_aadm/assets/:name', async (req, reply) => {
-    const name = (req.params as { name: string }).name;
-    const asset = await loadTerminalAsset(name);
-    if (!asset) {
-      return reply.code(404).send({ ok: false, error: 'not_found' });
+  app.get('/_aadm/desktop/:id/config', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const st = await loadState();
+    const d = st.desktops.find((desktop) => desktop.id === id);
+    if (!d) return reply.code(404).send({ ok: false, error: 'not_found' });
+
+    reply.header('cache-control', 'no-store');
+    return buildDesktopConfig(d);
+  });
+
+  interface BrowserLogEntry {
+    level?: string;
+    msg?: string;
+    time?: number;
+    source?: string;
+    [key: string]: unknown;
+  }
+
+  app.post('/_aadm/logs', async (req, reply) => {
+    const token = req.headers['x-aadm-logs-token'];
+    if (token !== browserLogsToken) {
+      return reply.code(403).send({ ok: false, error: 'invalid_token' });
     }
 
-    reply.type(asset.contentType);
-    reply.header('cache-control', 'public, max-age=3600');
-    return reply.send(asset.body);
+    const entries = Array.isArray(req.body)
+      ? (req.body as BrowserLogEntry[])
+      : [];
+    for (const entry of entries) {
+      const { level, msg, time, source, ...rest } = entry;
+      const message = msg ?? '';
+      const meta: Record<string, unknown> = { browser: true, ...rest };
+      if (source) meta.source = source;
+      if (time) meta.browserTime = time;
+
+      switch (level) {
+        case 'trace':
+          req.log.trace(meta, message);
+          break;
+        case 'debug':
+          req.log.debug(meta, message);
+          break;
+        case 'warn':
+          req.log.warn(meta, message);
+          break;
+        case 'error':
+          req.log.error(meta, message);
+          break;
+        default:
+          req.log.info(meta, message);
+          break;
+      }
+    }
+
+    return reply.send({ ok: true });
   });
+
+  if (viteDevUrl) {
+    app.get('/_aadm/desktop-app/*', async (req, reply) => {
+      const suffix = (req.params as { '*': string })['*'];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (reply as any).from(`${viteDevUrl}/_aadm/desktop-app/${suffix}`);
+    });
+  }
 
   app.get('/_aadm/verify/:id', async (req, reply) => {
     const id = (req.params as { id: string }).id;
@@ -1156,6 +1380,7 @@ export async function startServer() {
   await fs.mkdir(config.nginxSnippetDir, { recursive: true });
   await fs.mkdir(getStateDir(), { recursive: true });
   await fs.mkdir(config.workspaceRootDir, { recursive: true });
+  await writeGlobalSnippet();
   await fs.access(config.nginxBin, fsConstants.X_OK);
   await fs.access(config.systemctlBin, fsConstants.X_OK);
   await fs.access(config.tmuxBin, fsConstants.X_OK);

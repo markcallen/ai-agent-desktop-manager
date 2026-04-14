@@ -1,0 +1,44 @@
+server:
+  listen: '0.0.0.0:9445'
+
+# No tls section — runs without encryption (dev mode only)
+# No auth section — auth disabled (dev mode only)
+
+feature_flags:
+  provider_fallbacks: false
+
+sessions:
+  max_per_project: 5
+  max_global: 20
+  idle_timeout: '30m'
+  stop_grace_period: '10s'
+  event_buffer_size: 8388608
+
+input:
+  max_size_bytes: 65536
+
+rate_limits:
+  global_rps: 50
+  global_burst: 100
+  start_session_per_client_rps: 1
+  start_session_per_client_burst: 3
+  send_input_per_session_rps: 5
+  send_input_per_session_burst: 20
+
+providers:
+  claude:
+    binary: 'node'
+    args: ['./node_modules/@anthropic-ai/claude-code/cli.js', '--verbose']
+    startup_timeout: '60s'
+    startup_probe: 'prompt'
+    required_env: ['ANTHROPIC_API_KEY']
+    prompt_pattern: "(?m)(❯|>\\s*$)"
+
+# Must match the path where aadm-data is mounted in this container (/app/data)
+allowed_paths:
+  - '/app/data/workspaces'
+  - '/tmp'
+
+logging:
+  level: 'info'
+  format: 'json'

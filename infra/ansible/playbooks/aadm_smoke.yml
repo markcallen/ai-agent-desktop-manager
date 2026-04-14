@@ -27,6 +27,15 @@
     aadm_tls_key_path: '/etc/letsencrypt/live/{{ aadm_tls_domain }}/privkey.pem'
     aadm_smoke_create_desktop: true
     aadm_smoke_destroy_desktop: false
+    # ai-agent-bridge address for AADM_BRIDGE_ADDR.
+    # Empty = bridge disabled (AADM runs without agent sessions).
+    # Set to the gRPC address of a running ai-agent-bridge instance, e.g. 127.0.0.1:9445,
+    # when the bridge is deployed alongside AADM on this host.
+    aadm_bridge_addr: ''
+    # API keys forwarded to the bridge process environment (only used when bridge is deployed).
+    aadm_anthropic_api_key: ''
+    aadm_openai_api_key: ''
+    aadm_gemini_api_key: ''
   tasks:
     - name: Wait for cloud-init to finish if present
       ansible.builtin.command:
@@ -350,7 +359,7 @@
           AADM_CDP_PORT_MAX=9231
           AADM_AAB_PORT_MIN=8765
           AADM_AAB_PORT_MAX=8774
-          AADM_BRIDGE_ADDR=http://127.0.0.1:8765
+          AADM_BRIDGE_ADDR={{ aadm_bridge_addr }}
           AADM_NGINX_BIN=/usr/sbin/nginx
           AADM_SYSTEMCTL_BIN=/bin/systemctl
           AADM_UNIT_VNC=vnc@

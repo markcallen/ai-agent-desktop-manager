@@ -1,0 +1,115 @@
+services:
+  aadm:
+    build: .
+    entrypoint: ['/bin/bash', '/app/local/docker-entrypoint.sh']
+    command: ['node', 'dist/index.js']
+    ports:
+      - '8899:8899'
+    environment:
+      AADM_HOST: '0.0.0.0'
+      AADM_PORT: '8899'
+      AADM_PUBLIC_BASE_URL: 'http://localhost:8899'
+      # Stub out nginx and systemctl — not needed for terminal/AI agent debugging
+      AADM_NGINX_BIN: '/app/local/stubs/nginx'
+      AADM_SYSTEMCTL_BIN: '/app/local/stubs/systemctl'
+      AADM_NGINX_SNIPPET_DIR: '/app/data/nginx-snippets'
+      # tmux and script are installed in the image at these paths
+      AADM_TMUX_BIN: '/usr/bin/tmux'
+      AADM_TMUX_CONF_PATH: '/var/lib/aadm/.tmux.conf'
+      AADM_SCRIPT_BIN: '/usr/bin/script'
+      # State and workspace dirs inside the data volume
+      AADM_STATE_DIR: '/app/data'
+      AADM_WORKSPACE_ROOT_DIR: '/app/data/workspaces'
+      # AI agent bridge — separate ai-agent-bridge service on port 9445
+      AADM_BRIDGE_ADDR: 'bridge:9445'
+      # Compact display/port ranges for local use
+      AADM_DISPLAY_MIN: '1'
+      AADM_DISPLAY_MAX: '5'
+      AADM_WEBSOCKIFY_PORT_MIN: '6081'
+      AADM_WEBSOCKIFY_PORT_MAX: '6085'
+      AADM_CDP_PORT_MIN: '9222'
+      AADM_CDP_PORT_MAX: '9226'
+      AADM_AAB_PORT_MIN: '8765'
+      AADM_AAB_PORT_MAX: '8769'
+    volumes:
+      - ./local:/app/local:ro
+      - aadm-data:/app/data
+    depends_on:
+      aab:
+        condition: service_healthy
+      bridge:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://localhost:8899/health']
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  aab:
+    build:
+      context: ../ai-agent-browser
+    # Share Chrome's network namespace so aab can reach Chrome on localhost.
+    # Chrome only binds its CDP port to 127.0.0.1 even with --remote-debugging-address=0.0.0.0,
+    # so a separate network interface cannot reach it. With network_mode: service:chrome, aab
+    # shares the same loopback and can connect to Chrome's CDP port.
+    network_mode: 'service:chrome'
+    environment:
+      AAB_HOST: '0.0.0.0'
+      AAB_PORT: '8765'
+      AAB_CDP_HOST: '127.0.0.1'
+      AAB_CDP_PORT: '9222'
+      # Retry until chrome is ready (up to 30 s)
+      AAB_CDP_RETRY_MS: '2000'
+      AAB_CDP_MAX_RETRY_MS: '30000'
+    depends_on:
+      chrome:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >
+          require('net')
+          .connect(8765, 'localhost', () => process.exit(0))
+          .on('error', () => process.exit(1))
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  chrome:
+    image: zenika/alpine-chrome:latest
+    # shm_size is required — Chrome crashes without adequate shared memory
+    shm_size: 128m
+    command:
+      - --no-sandbox
+      - --headless=new
+      - --disable-gpu
+      - --remote-debugging-address=0.0.0.0
+      - --remote-debugging-port=9222
+    healthcheck:
+      # Alpine resolves `localhost` to ::1 but Chrome binds to 127.0.0.1 — use the IP
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:9222/json/version']
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  bridge:
+    image: ghcr.io/markcallen/ai-agent-bridge:v0.2.0
+    environment:
+      BRIDGE_CONFIG: /app/config/bridge-local.yaml
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./local/bridge-local.yaml:/app/config/bridge-local.yaml:ro
+      # Share the aadm-data volume so the bridge can access workspace directories
+      # that AADM passes as repoPath (e.g. /app/data/workspaces/<desktop-id>)
+      - aadm-data:/app/data
+    healthcheck:
+      test: ['CMD-SHELL', "bash -c '</dev/tcp/127.0.0.1/9445'"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  aadm-data:

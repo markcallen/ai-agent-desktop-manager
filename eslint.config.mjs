@@ -15,6 +15,6 @@ export default [
     }
   },
   {
-    ignores: ['node_modules', 'dist', 'infra/ansible/roles']
+    ignores: ['node_modules', 'dist', 'web/**', 'infra/ansible/roles']
   }
 ];

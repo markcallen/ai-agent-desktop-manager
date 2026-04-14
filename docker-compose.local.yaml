@@ -1,0 +1,51 @@
+services:
+  aadm:
+    # Mount source for live editing; tsx watch (pnpm run dev) picks up changes
+    # without a full image rebuild.
+    command: ['pnpm', 'run', 'dev']
+    environment:
+      AADM_VITE_DEV_URL: 'http://vite-dev:5173'
+    volumes:
+      - ./local:/app/local:ro
+      - ./src:/app/src
+      - aadm-data:/app/data
+    depends_on:
+      aab:
+        condition: service_healthy
+      bridge:
+        condition: service_healthy
+      vite-dev:
+        condition: service_started
+
+  vite-dev:
+    image: node:24-bookworm
+    working_dir: /app
+    command: sh -c "corepack enable && corepack prepare pnpm@9.0.0 --activate && pnpm install && pnpm run dev"
+    environment:
+      NODE_ENV: development
+      # Tell Vite's HMR client to connect via the Fastify proxy on port 8899
+      # instead of directly to the Vite dev server on 5173.
+      VITE_HMR_CLIENT_PORT: '8899'
+    volumes:
+      - ./web:/app
+      - vite-node-modules:/app/node_modules
+
+  aab:
+    # Run aab in dev/watch mode against the chrome service (replaces noVNC).
+    # Source edits in ../ai-agent-browser are reflected without a full rebuild.
+    command: ['pnpm', 'run', 'dev']
+    depends_on:
+      chrome:
+        condition: service_healthy
+    develop:
+      watch:
+        - action: sync+restart
+          path: ../ai-agent-browser/src
+          target: /app/src
+        - action: rebuild
+          path: ../ai-agent-browser/package.json
+        - action: rebuild
+          path: ../ai-agent-browser/pnpm-lock.yaml
+
+volumes:
+  vite-node-modules:

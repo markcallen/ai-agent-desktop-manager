@@ -1,8 +1,12 @@
 server:
   listen: '0.0.0.0:9445'
 
-# No tls section — runs without encryption (dev mode only)
-# No auth section — auth disabled (dev mode only)
+tls:
+  ca_bundle: '/run/bridge-certs/ca-bundle.crt'
+  cert: '/run/bridge-certs/bridge.crt'
+  key: '/run/bridge-certs/bridge.key'
+
+# No auth section — mTLS provides client authentication
 
 feature_flags:
   provider_fallbacks: false
@@ -30,6 +34,7 @@ providers:
     binary: 'node'
     args: ['./node_modules/@anthropic-ai/claude-code/cli.js', '--verbose']
     startup_timeout: '60s'
+    validate_startup: false
     startup_probe: 'prompt'
     required_env: ['ANTHROPIC_API_KEY']
     prompt_pattern: "(?m)(❯|>\\s*$)"

@@ -61,7 +61,6 @@ import {
   ensureWorkspaceDir,
   isTmuxSessionActive,
   killTmuxSession,
-  managerTerminalWebsocketPath,
   resizeTmuxSession,
   terminalMetadataForDesktop,
   terminalSessionName
@@ -374,6 +373,37 @@ async function restoreDestroyedDesktop(
   return issues;
 }
 
+async function restoreRunningDesktops(
+  app: Pick<FastifyInstance, 'log'>,
+  state?: State
+) {
+  const effectiveState = state ?? (await loadState());
+  const restored: string[] = [];
+  const failed: Array<{ id: string; issues: string[] }> = [];
+
+  for (const desktop of effectiveState.desktops.filter(
+    (entry) => entry.status === 'running'
+  )) {
+    const issues = await restoreDestroyedDesktop(desktop, app.log);
+    if (issues.length === 0) {
+      restored.push(desktop.id);
+      continue;
+    }
+
+    failed.push({ id: desktop.id, issues });
+    app.log.warn(
+      { desktopId: desktop.id, issues },
+      'desktop restore completed with issues'
+    );
+  }
+
+  if (restored.length > 0) {
+    app.log.info({ restored }, 'restored persisted desktops');
+  }
+
+  return { restored, failed };
+}
+
 type BuildAppOptions = {
   loggerStream?: NodeJS.WritableStream;
 };
@@ -447,9 +477,8 @@ const viteDevUrl = config.viteDevUrl;
 const browserLogsToken = crypto.randomBytes(32).toString('hex');
 
 function buildDesktopConfig(d: DesktopRecord) {
-  const termPath = managerTerminalWebsocketPath(d.id);
-  const bridgePath = managerBridgeWebsocketPath(d.id);
   const bridgeEnabled = !!config.bridgeAddr;
+  const bridgeWebsocketUrl = managerBridgeWebsocketPath(d.id);
 
   return {
     desktop: {
@@ -459,16 +488,16 @@ function buildDesktopConfig(d: DesktopRecord) {
       novncUrl: novncUrlFor(d.display)
     },
     terminal: {
-      websocketUrl: termPath,
-      websocketPath: termPath,
-      sessionName: terminalSessionName(d.id),
-      workspaceDir: desktopWorkspaceDir(d.id)
+      websocketUrl: d.terminalWebsocketUrl,
+      websocketPath: d.terminalWebsocketPath,
+      sessionName: d.terminalSessionName,
+      workspaceDir: d.workspaceDir
     },
     bridge: {
       enabled: bridgeEnabled,
-      websocketUrl: bridgePath,
-      websocketPath: bridgePath,
-      workspaceDir: desktopWorkspaceDir(d.id),
+      websocketUrl: bridgeWebsocketUrl,
+      websocketPath: bridgeWebsocketUrl,
+      workspaceDir: d.workspaceDir,
       defaultProvider: 'claude',
       projectId: d.id
     },
@@ -574,6 +603,12 @@ export function buildApp(options: BuildAppOptions = {}) {
       const rows = Math.max(
         1,
         Number.parseInt(requestUrl.searchParams.get('rows') ?? '40', 10) || 40
+      );
+
+      await ensureWorkspaceDir(desktop.workspaceDir);
+      await ensureTmuxSession(
+        desktop.terminalSessionName,
+        desktop.workspaceDir
       );
 
       const terminalProcess = createTerminalAttachProcess({
@@ -924,16 +959,128 @@ export function buildApp(options: BuildAppOptions = {}) {
     [key: string]: unknown;
   }
 
+  interface BrowserPinoLogEvent {
+    ts?: number;
+    messages?: unknown[];
+    bindings?: Record<string, unknown>[];
+    level?: {
+      label?: string;
+      value?: number;
+    };
+  }
+
+  interface BrowserPinoBatchEntry {
+    level?: string;
+    logEvent?: BrowserPinoLogEvent;
+  }
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function stringifyBrowserMessage(value: unknown) {
+    if (typeof value === 'string') return value;
+    if (value instanceof Error) return value.message;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  function normalizeBrowserPinoBatchEntry(entry: BrowserPinoBatchEntry) {
+    const logEvent = entry.logEvent;
+    if (!logEvent) return undefined;
+
+    const meta: Record<string, unknown> = { browser: true };
+    if (typeof logEvent.ts === 'number') {
+      meta.browserTime = logEvent.ts;
+    }
+
+    for (const binding of logEvent.bindings ?? []) {
+      if (isRecord(binding)) {
+        Object.assign(meta, binding);
+      }
+    }
+
+    const messages = Array.isArray(logEvent.messages) ? logEvent.messages : [];
+    let message = '';
+
+    if (messages.length > 0) {
+      const [first, second, ...rest] = messages;
+
+      if (isRecord(first)) {
+        Object.assign(meta, first);
+        if (typeof second === 'string') {
+          message = second;
+          if (rest.length > 0) meta.args = rest;
+        } else {
+          message = stringifyBrowserMessage(
+            first.msg ?? first.message ?? first
+          );
+          if (second !== undefined) {
+            meta.args = [second, ...rest];
+          }
+        }
+      } else if (typeof first === 'string') {
+        message = first;
+        if (second !== undefined) {
+          meta.args = [second, ...rest];
+        }
+      } else {
+        message = stringifyBrowserMessage(first);
+        if (second !== undefined) {
+          meta.args = [second, ...rest];
+        }
+      }
+    }
+
+    return {
+      level: entry.level ?? logEvent.level?.label ?? 'info',
+      msg: message,
+      meta
+    };
+  }
+
   app.post('/_aadm/logs', async (req, reply) => {
     const token = req.headers['x-aadm-logs-token'];
     if (token !== browserLogsToken) {
       return reply.code(403).send({ ok: false, error: 'invalid_token' });
     }
 
-    const entries = Array.isArray(req.body)
+    const pinoBatchEntries = isRecord(req.body)
+      ? Array.isArray(req.body.logs)
+        ? (req.body.logs as BrowserPinoBatchEntry[])
+        : []
+      : [];
+    const legacyEntries = Array.isArray(req.body)
       ? (req.body as BrowserLogEntry[])
       : [];
-    for (const entry of entries) {
+
+    for (const entry of pinoBatchEntries) {
+      const normalized = normalizeBrowserPinoBatchEntry(entry);
+      if (!normalized) continue;
+
+      switch (normalized.level) {
+        case 'trace':
+          req.log.trace(normalized.meta, normalized.msg);
+          break;
+        case 'debug':
+          req.log.debug(normalized.meta, normalized.msg);
+          break;
+        case 'warn':
+          req.log.warn(normalized.meta, normalized.msg);
+          break;
+        case 'error':
+        case 'fatal':
+          req.log.error(normalized.meta, normalized.msg);
+          break;
+        default:
+          req.log.info(normalized.meta, normalized.msg);
+      }
+    }
+
+    for (const entry of legacyEntries) {
       const { level, msg, time, source, ...rest } = entry;
       const message = msg ?? '';
       const meta: Record<string, unknown> = { browser: true, ...rest };
@@ -1387,6 +1534,7 @@ export async function startServer() {
   await fs.access(config.scriptBin, fsConstants.X_OK);
 
   const app = buildApp();
+  await restoreRunningDesktops(app);
   if (config.ttlSweepIntervalMs > 0) {
     const timer = setInterval(() => {
       void sweepExpiredDesktops(app);

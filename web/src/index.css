@@ -1,0 +1,112 @@
+@import 'tailwindcss';
+@import '@xterm/xterm/css/xterm.css';
+
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+:root {
+  --bg: #060a14;
+  --surface: rgba(8, 16, 36, 0.9);
+  --surface-2: rgba(4, 10, 24, 0.95);
+  --border: rgba(20, 184, 166, 0.14);
+  --border-md: rgba(20, 184, 166, 0.28);
+  --accent: #2dd4bf;
+  --accent-dim: rgba(45, 212, 191, 0.18);
+  --ink: #e2e8f0;
+  --ink-muted: #64748b;
+  --ink-dim: #1e293b;
+  --glow-teal: rgba(20, 184, 166, 0.2);
+  --glow-blue: rgba(59, 130, 246, 0.14);
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', Menlo, monospace;
+  --font-ui: 'Syne', var(--font-mono);
+  color-scheme: dark;
+}
+
+/* ── Reset ─────────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-mono);
+  background-color: var(--bg);
+  color: var(--ink);
+  /* Subtle noise texture */
+  background-image:
+    radial-gradient(ellipse 60% 40% at 5% 0%, var(--glow-teal), transparent),
+    radial-gradient(ellipse 50% 50% at 95% 100%, var(--glow-blue), transparent),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
+}
+
+/* Subtle horizontal scanline overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.04) 2px,
+    rgba(0, 0, 0, 0.04) 4px
+  );
+  z-index: 9999;
+}
+
+/* ── xterm overrides ───────────────────────────────────────────────────────── */
+.xterm {
+  height: 100%;
+}
+.xterm-viewport {
+  overflow-y: auto !important;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ink-dim);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-muted);
+}
+
+/* ── Status pulse animation ────────────────────────────────────────────────── */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+.pulse {
+  animation: pulse-dot 1.8s ease-in-out infinite;
+}
+
+/* ── Tab underline glow ─────────────────────────────────────────────────────── */
+@keyframes tab-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

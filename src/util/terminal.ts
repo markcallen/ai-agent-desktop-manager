@@ -5,9 +5,10 @@ import { execCmd } from './exec.js';
 
 const TERMINAL_WINDOW_NAMES = ['shell', 'editor', 'compose', 'tests'] as const;
 const TMUX_WINDOW_COMMAND = '/bin/bash';
-const TMUX_ENV = {
+export const TERMINAL_ENV = {
   HOME: '/var/lib/aadm',
-  SHELL: TMUX_WINDOW_COMMAND
+  SHELL: TMUX_WINDOW_COMMAND,
+  TERM: 'xterm-256color'
 };
 const TMUX_MANAGED_CONFIG = `# Managed by ai-agent-desktop-manager
 set-option -g default-shell "${TMUX_WINDOW_COMMAND}"
@@ -68,27 +69,6 @@ export function desktopWorkspaceDir(desktopId: string) {
   return workspaceDirForDesktop(config.workspaceRootDir, desktopId);
 }
 
-export function buildTerminalWebsocketPath(
-  novncPathPrefix: string,
-  display: number
-) {
-  const prefix = novncPathPrefix.replace(/\/$/, '');
-  return `${prefix}/${display}/terminal/ws`;
-}
-
-export function buildTerminalWebsocketUrl(
-  publicBaseUrl: string,
-  novncPathPrefix: string,
-  display: number
-) {
-  const url = new URL(
-    buildTerminalWebsocketPath(novncPathPrefix, display),
-    publicBaseUrl
-  );
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  return url.toString();
-}
-
 export function managerTerminalWebsocketPath(desktopId: string) {
   return `/_aadm/terminal/${desktopId}/ws`;
 }
@@ -102,15 +82,8 @@ export function terminalMetadataForDesktop(desktop: {
   return {
     sessionName: desktop.terminalSessionName ?? terminalSessionName(desktop.id),
     workspaceDir: desktop.workspaceDir ?? desktopWorkspaceDir(desktop.id),
-    websocketPath: buildTerminalWebsocketPath(
-      config.novncPathPrefix,
-      desktop.display
-    ),
-    websocketUrl: buildTerminalWebsocketUrl(
-      config.publicBaseUrl,
-      config.novncPathPrefix,
-      desktop.display
-    )
+    websocketPath: managerTerminalWebsocketPath(desktop.id),
+    websocketUrl: managerTerminalWebsocketPath(desktop.id)
   };
 }
 
@@ -120,7 +93,7 @@ async function tmuxSessionExists(sessionName: string) {
     config.tmuxBin,
     tmuxArgs(['has-session', '-t', sessionName]),
     {
-      env: TMUX_ENV
+      env: TERMINAL_ENV
     }
   );
   return result.code === 0;
@@ -165,7 +138,7 @@ export async function ensureTmuxSession(
         TMUX_WINDOW_COMMAND
       ]),
       {
-        env: TMUX_ENV
+        env: TERMINAL_ENV
       }
     )
   );
@@ -187,7 +160,7 @@ export async function ensureTmuxSession(
           TMUX_WINDOW_COMMAND
         ]),
         {
-          env: TMUX_ENV
+          env: TERMINAL_ENV
         }
       )
     );
@@ -202,7 +175,7 @@ export async function killTmuxSession(sessionName: string) {
     config.tmuxBin,
     tmuxArgs(['kill-session', '-t', sessionName]),
     {
-      env: TMUX_ENV
+      env: TERMINAL_ENV
     }
   );
   if (result.code === 0) {
@@ -241,7 +214,7 @@ export async function resizeTmuxSession(
       String(rows)
     ]),
     {
-      env: TMUX_ENV
+      env: TERMINAL_ENV
     }
   );
 }

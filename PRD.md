@@ -86,6 +86,24 @@ Base: `http://127.0.0.1:8899`
 
 - `GET /v1/desktops/:id/doctor` → checks (ports, services, nginx route file exists)
 
+### Desktop shell
+
+- The browser desktop shell must resolve terminal and bridge websocket endpoints against the desktop's public base URL.
+- The shell must not prefer `localhost`, `127.0.0.1`, or `::1` for browser websocket connections when the desktop is being accessed through a non-loopback public URL.
+- The managed terminal session and terminal attach process must provide a clear-capable terminal type so shell startup scripts that invoke `clear` do not fail the Terminal tab.
+- The browser desktop shell must use a Pino-based logger for browser-side diagnostics.
+- Browser logging must capture `console.log`, `console.info`, `console.debug`, `console.warn`, `console.error`, uncaught errors, and unhandled promise rejections.
+- Browser logging must POST batched Pino log events to `/_aadm/logs` with the per-desktop browser logs token.
+- The manager must ingest those browser log events and emit them through the server Pino logger without exposing sensitive auth headers or cookies.
+- Acceptance criteria:
+  - Given a public desktop URL on a non-loopback host and a relative websocket path, the browser connects to that public host.
+  - Given a public desktop URL on a non-loopback host and a stored absolute websocket URL that points at loopback, the browser rewrites it to the public host before connecting.
+  - The terminal websocket URL shown in the UI matches the resolved browser connection URL.
+  - Given a shell profile or terminal helper that invokes `clear`, opening the Terminal tab still attaches successfully because the tmux session and attach wrapper both expose a non-dumb `TERM`.
+  - Given a browser console call after desktop config load, the web app emits a Pino browser log event to `/_aadm/logs`.
+  - Given an uncaught browser error or unhandled promise rejection after desktop config load, the web app emits an error-level Pino browser log event to `/_aadm/logs`.
+  - Given a valid batch of browser Pino log events at `/_aadm/logs`, the manager writes them through its server logger with browser metadata preserved.
+
 ### Orchestration
 
 For each desktop, the manager must:

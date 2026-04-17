@@ -1,0 +1,5 @@
+#!/bin/bash
+# Stub nginx for local development — always succeeds.
+# Real nginx is not present in the dev container; AADM only needs nginx for
+# production routing (noVNC). Terminal and AI agent routes go directly to aadm.
+exit 0

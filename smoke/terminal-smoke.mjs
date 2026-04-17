@@ -43,7 +43,15 @@ export function parseArgs(argv) {
 export function buildTerminalWebsocketUrl(desktopAccessUrl) {
   const url = new URL(desktopAccessUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.pathname = url.pathname.replace(/\/access$/, '/terminal/ws');
+  // Extract display from URL path: /desktop/<display>/...
+  const pathParts = url.pathname.split('/').filter(Boolean);
+  const displayIndex = pathParts.indexOf('desktop');
+  if (displayIndex === -1 || displayIndex + 1 >= pathParts.length) {
+    throw new Error('Invalid desktop access URL');
+  }
+  const display = pathParts[displayIndex + 1];
+  const desktopId = `desk-${display}`;
+  url.pathname = `/_aadm/terminal/${desktopId}/ws`;
   url.search = '';
   return url.toString();
 }

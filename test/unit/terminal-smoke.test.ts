@@ -20,11 +20,11 @@ test('terminal smoke parser accepts desktop access bootstrap url and output path
   });
 });
 
-test('terminal smoke websocket helper swaps the access path for the terminal websocket path', () => {
+test('terminal smoke websocket helper builds the AADM terminal websocket URL', () => {
   assert.equal(
     buildTerminalWebsocketUrl(
       'https://smoke.markcallen.dev/desktop/2/access?token=abc'
     ),
-    'wss://smoke.markcallen.dev/desktop/2/terminal/ws'
+    'wss://smoke.markcallen.dev/_aadm/terminal/desk-2/ws'
   );
 });

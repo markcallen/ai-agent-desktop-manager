@@ -6,8 +6,7 @@ import {
   type DesktopRouteAuth
 } from './route-auth.js';
 import {
-  buildTerminalWebsocketPath,
-  buildTerminalWebsocketUrl,
+  managerTerminalWebsocketPath,
   desktopWorkspaceDir,
   terminalSessionName
 } from './terminal.js';
@@ -47,6 +46,10 @@ type SaveStateHook = (
 
 let saveStateHook: SaveStateHook | undefined;
 
+function normalizedTerminalWebsocketPath(desktopId: string): string {
+  return managerTerminalWebsocketPath(desktopId);
+}
+
 async function ensure() {
   await fs.mkdir(stateDir, { recursive: true });
 }
@@ -75,23 +78,12 @@ export async function loadState(): Promise<State> {
               desktop.terminalSessionName
                 ? desktop.terminalSessionName
                 : terminalSessionName(String(desktop.id ?? '')),
-            terminalWebsocketPath:
-              typeof desktop.terminalWebsocketPath === 'string' &&
-              desktop.terminalWebsocketPath
-                ? desktop.terminalWebsocketPath
-                : buildTerminalWebsocketPath(
-                    config.novncPathPrefix,
-                    Number(desktop.display ?? 0)
-                  ),
-            terminalWebsocketUrl:
-              typeof desktop.terminalWebsocketUrl === 'string' &&
-              desktop.terminalWebsocketUrl
-                ? desktop.terminalWebsocketUrl
-                : buildTerminalWebsocketUrl(
-                    config.publicBaseUrl,
-                    config.novncPathPrefix,
-                    Number(desktop.display ?? 0)
-                  ),
+            terminalWebsocketPath: normalizedTerminalWebsocketPath(
+              String(desktop.id ?? '')
+            ),
+            terminalWebsocketUrl: normalizedTerminalWebsocketPath(
+              String(desktop.id ?? '')
+            ),
             routeAuth: normalizeDesktopRouteAuth(desktop.routeAuth) ?? {
               mode: 'none'
             }

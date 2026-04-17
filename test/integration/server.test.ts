@@ -17,6 +17,53 @@ let loggerOutput = '';
 
 const authHeaders = { authorization: 'Bearer test-token' };
 
+function installDefaultSaveStateHook(
+  storeMod: Awaited<typeof import('../../src/util/store.ts')>
+) {
+  storeMod.setSaveStateHook(async (state, next) => {
+    if (saveFailuresRemaining > 0) {
+      saveFailuresRemaining -= 1;
+      throw new Error('simulated state save failure');
+    }
+    await next(state);
+  });
+}
+
+function installDefaultExecRunner(
+  execMod: Awaited<typeof import('../../src/util/exec.ts')>
+) {
+  execMod.setExecRunner(async (cmd, args, opts) => {
+    calls.push({ cmd, args, sudo: Boolean(opts?.sudo) });
+
+    if (cmd.endsWith('nginx') && args[0] === '-t') {
+      if (failNginxTest)
+        return { code: 1, stdout: '', stderr: 'invalid nginx config' };
+      return { code: 0, stdout: 'ok', stderr: '' };
+    }
+
+    if (
+      cmd.endsWith('systemctl') &&
+      args[0] === 'reload' &&
+      args[1] === 'nginx'
+    ) {
+      return { code: 0, stdout: '', stderr: '' };
+    }
+
+    if (cmd.endsWith('systemctl') && args[0] === 'is-active') {
+      return { code: 0, stdout: 'active\n', stderr: '' };
+    }
+
+    if (
+      cmd.endsWith('systemctl') &&
+      (args[0] === 'start' || args[0] === 'stop')
+    ) {
+      return { code: 0, stdout: '', stderr: '' };
+    }
+
+    return { code: 0, stdout: '', stderr: '' };
+  });
+}
+
 async function importServerWithEnv() {
   tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aadm-integration-'));
   const stateDir = path.join(tmpRoot, 'state');
@@ -49,44 +96,8 @@ async function importServerWithEnv() {
   configMod.config.publicBaseUrl = 'https://host.example.com';
   netMod.setPortChecker(async () => true);
   const storeMod = await import('../../src/util/store.ts');
-  storeMod.setSaveStateHook(async (state, next) => {
-    if (saveFailuresRemaining > 0) {
-      saveFailuresRemaining -= 1;
-      throw new Error('simulated state save failure');
-    }
-    await next(state);
-  });
-
-  execMod.setExecRunner(async (cmd, args, opts) => {
-    calls.push({ cmd, args, sudo: Boolean(opts?.sudo) });
-
-    if (cmd.endsWith('nginx') && args[0] === '-t') {
-      if (failNginxTest)
-        return { code: 1, stdout: '', stderr: 'invalid nginx config' };
-      return { code: 0, stdout: 'ok', stderr: '' };
-    }
-
-    if (
-      cmd.endsWith('systemctl') &&
-      args[0] === 'reload' &&
-      args[1] === 'nginx'
-    ) {
-      return { code: 0, stdout: '', stderr: '' };
-    }
-
-    if (cmd.endsWith('systemctl') && args[0] === 'is-active') {
-      return { code: 0, stdout: 'active\n', stderr: '' };
-    }
-
-    if (
-      cmd.endsWith('systemctl') &&
-      (args[0] === 'start' || args[0] === 'stop')
-    ) {
-      return { code: 0, stdout: '', stderr: '' };
-    }
-
-    return { code: 0, stdout: '', stderr: '' };
-  });
+  installDefaultSaveStateHook(storeMod);
+  installDefaultExecRunner(execMod);
 
   const serverMod = await import('../../src/server.ts');
   app = serverMod.buildApp({ loggerStream });
@@ -169,8 +180,8 @@ test(
     assert.deepEqual(created.terminal, {
       sessionName: 'aadm-desk-1',
       workspaceDir: path.join(stateDirFromTmpRoot(), 'workspaces', 'desk-1'),
-      websocketPath: '/desktop/1/terminal/ws',
-      websocketUrl: 'wss://host.example.com/desktop/1/terminal/ws'
+      websocketPath: '/_aadm/terminal/desk-1/ws',
+      websocketUrl: '/_aadm/terminal/desk-1/ws'
     });
 
     const doctor = await app.inject({
@@ -228,8 +239,8 @@ test(
       terminal: {
         sessionName: 'aadm-desk-2',
         workspaceDir: path.join(stateDirFromTmpRoot(), 'workspaces', 'desk-2'),
-        websocketPath: '/desktop/2/terminal/ws',
-        websocketUrl: 'wss://host.example.com/desktop/2/terminal/ws'
+        websocketPath: '/_aadm/terminal/desk-2/ws',
+        websocketUrl: '/_aadm/terminal/desk-2/ws'
       },
       accessUrl: terminal.json().accessUrl,
       accessUrlExpiresAt: terminal.json().accessUrlExpiresAt
@@ -332,8 +343,11 @@ test(
     });
     assert.equal(access.statusCode, 302);
     assert.equal(access.headers.location, '/desktop/4/');
-    assert.match(access.headers['set-cookie'] ?? '', /HttpOnly/);
-    assert.match(access.headers['set-cookie'] ?? '', /Secure/);
+    const cookieHeader = Array.isArray(access.headers['set-cookie'])
+      ? access.headers['set-cookie'][0]
+      : (access.headers['set-cookie'] ?? '');
+    assert.match(cookieHeader, /HttpOnly/);
+    assert.match(cookieHeader, /Secure/);
 
     const verifyDenied = await app.inject({
       method: 'GET',
@@ -373,7 +387,7 @@ test(
 );
 
 test(
-  'desktop shell route returns terminal-enabled HTML for a managed desktop',
+  'desktop shell route returns Vite HTML and config JSON for a managed desktop',
   { concurrency: false },
   async () => {
     assert.ok(app);
@@ -391,6 +405,7 @@ test(
     assert.equal(create.statusCode, 200);
     const created = create.json();
 
+    // Shell route returns the Vite index.html
     const shell = await app.inject({
       method: 'GET',
       url: `/_aadm/desktop/${created.id}`
@@ -400,50 +415,42 @@ test(
       String(shell.headers['content-type']),
       /^text\/html; charset=utf-8/
     );
-    assert.match(shell.body, /data-aadm-desktop-frame/);
-    assert.match(
-      shell.body,
-      new RegExp(`/desktop/${created.display}/assets/xterm\\.css`)
+    assert.match(shell.body, /<div id="root">/);
+    assert.match(shell.body, /\/_aadm\/desktop-app\//);
+
+    // Config endpoint returns JSON with terminal and bridge metadata
+    const cfg = await app.inject({
+      method: 'GET',
+      url: `/_aadm/desktop/${created.id}/config`
+    });
+    assert.equal(cfg.statusCode, 200);
+    const json = cfg.json() as {
+      desktop: { id: string; display: number; label: string; novncUrl: string };
+      terminal: {
+        websocketUrl: string;
+        sessionName: string;
+        workspaceDir: string;
+      };
+      bridge: { enabled: boolean; websocketUrl: string };
+    };
+    assert.equal(json.desktop.id, created.id);
+    assert.equal(json.desktop.display, created.display);
+    assert.equal(json.desktop.label, 'shell');
+    assert.match(json.desktop.novncUrl, /\/desktop\//);
+    assert.equal(
+      json.terminal.websocketUrl,
+      `/_aadm/terminal/desk-${created.display}/ws`
     );
-    assert.match(
-      shell.body,
-      new RegExp(`/desktop/${created.display}/assets/xterm\\.js`)
+    assert.equal(json.bridge.enabled, false);
+    assert.equal(
+      json.bridge.websocketUrl,
+      `/_aadm/bridge/desk-${created.display}/ws`
     );
-    assert.match(
-      shell.body,
-      new RegExp(`/desktop/${created.display}/assets/addon-fit\\.js`)
-    );
-    assert.match(shell.body, /id="terminal-mount"/);
-    assert.match(shell.body, /id="agent-terminal-mount"/);
-    assert.match(shell.body, /AI Agent/);
-    assert.match(
-      shell.body,
-      new RegExp(
-        `/desktop/${created.display}/vnc\\.html\\?path=desktop/${created.display}/websockify`
-      )
-    );
-    assert.match(
-      shell.body,
-      new RegExp(
-        `wss://host\\.example\\.com/desktop/${created.display}/terminal/ws`
-      )
-    );
-    assert.match(
-      shell.body,
-      new RegExp(
-        `wss://host\\.example\\.com/desktop/${created.display}/bridge/ws`
-      )
-    );
-    assert.match(shell.body, /Bridge not configured on this host\./);
-    assert.doesNotMatch(shell.body, /cdn\.jsdelivr\.net/);
-    assert.doesNotMatch(shell.body, /id="terminal-command"/);
-    assert.doesNotMatch(shell.body, /id="terminal-output"/);
-    assert.match(shell.body, /Attached to tmux session/);
   }
 );
 
 test(
-  'desktop shell advertises bridge availability when ai-agent-bridge is configured',
+  'desktop config endpoint reports bridge enabled when ai-agent-bridge is configured',
   { concurrency: false },
   async () => {
     assert.ok(app);
@@ -465,22 +472,198 @@ test(
       assert.equal(create.statusCode, 200);
       const created = create.json();
 
-      const shell = await app.inject({
+      const cfg = await app.inject({
         method: 'GET',
-        url: `/_aadm/desktop/${created.id}`
+        url: `/_aadm/desktop/${created.id}/config`
       });
-      assert.equal(shell.statusCode, 200);
-      assert.match(
-        shell.body,
-        /Bridge available\. Start a session to attach the agent terminal\./
-      );
-      assert.match(shell.body, /id="agent-start"/);
-      assert.match(shell.body, /id="agent-stop"/);
-      assert.match(shell.body, /id="agent-provider"/);
-      assert.match(shell.body, new RegExp(`"enabled":true`));
+      assert.equal(cfg.statusCode, 200);
+      const json = cfg.json() as { bridge: { enabled: boolean } };
+      assert.equal(json.bridge.enabled, true);
     } finally {
       configMod.config.bridgeAddr = previousBridgeAddr;
     }
+  }
+);
+
+test(
+  'startServer restores tmux sessions for persisted running desktops',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+
+    const configMod = await import('../../src/util/config.ts');
+    const storeMod = await import('../../src/util/store.ts');
+    const statePath = path.join(stateDirFromTmpRoot(), 'state.json');
+    const previousState = await fs.readFile(statePath, 'utf-8');
+    const previousConfig = {
+      host: configMod.config.host,
+      port: configMod.config.port,
+      nginxBin: configMod.config.nginxBin,
+      systemctlBin: configMod.config.systemctlBin,
+      tmuxBin: configMod.config.tmuxBin,
+      scriptBin: configMod.config.scriptBin
+    };
+
+    await fs.writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          desktops: [
+            {
+              id: 'desk-1',
+              label: 'restored-shell',
+              createdAt: Date.now(),
+              status: 'running',
+              display: 1,
+              vncPort: 5901,
+              wsPort: 6081,
+              cdpPort: 9222,
+              aabPort: 8765,
+              novncUrl: 'https://host.example.com/desktop/1/',
+              aabUrl: 'http://127.0.0.1:8765',
+              workspaceDir: path.join(
+                stateDirFromTmpRoot(),
+                'workspaces',
+                'desk-1'
+              ),
+              terminalSessionName: 'aadm-desk-1',
+              terminalWebsocketPath: '/_aadm/terminal/desk-1/ws',
+              terminalWebsocketUrl: '/_aadm/terminal/desk-1/ws',
+              routeAuth: { mode: 'none' }
+            }
+          ]
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    configMod.config.host = '127.0.0.1';
+    configMod.config.port = 0;
+    configMod.config.nginxBin = '/bin/sh';
+    configMod.config.systemctlBin = '/bin/sh';
+    storeMod.setSaveStateHook();
+
+    calls = [];
+
+    const execMod = await import('../../src/util/exec.ts');
+    const missingTmuxSessions = new Set<string>();
+    execMod.setExecRunner(async (cmd, args, opts) => {
+      calls.push({ cmd, args, sudo: Boolean(opts?.sudo) });
+
+      if (cmd.endsWith('nginx') && args[0] === '-t') {
+        return { code: 0, stdout: 'ok', stderr: '' };
+      }
+      if (
+        cmd.endsWith('systemctl') &&
+        args[0] === 'reload' &&
+        args[1] === 'nginx'
+      ) {
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      if (cmd.endsWith('systemctl') && args[0] === 'is-active') {
+        return { code: 0, stdout: 'active\n', stderr: '' };
+      }
+      if (
+        cmd.endsWith('systemctl') &&
+        (args[0] === 'start' || args[0] === 'stop')
+      ) {
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      if (cmd.endsWith('tmux')) {
+        const command = args[2];
+        if (command === 'has-session') {
+          return {
+            code: 1,
+            stdout: '',
+            stderr: `can't find session: ${args[4] ?? 'unknown'}`
+          };
+        }
+        if (command === 'new-session') {
+          missingTmuxSessions.add(args[4] ?? '');
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      }
+
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    const serverMod = await import('../../src/server.ts');
+    const restoredApp = await serverMod.startServer();
+
+    try {
+      const tmuxCommands = calls.map((call) => call.args[2]);
+      assert.ok(tmuxCommands.includes('has-session'));
+      assert.ok(tmuxCommands.includes('new-session'));
+      assert.ok(tmuxCommands.includes('new-window'));
+    } finally {
+      await restoredApp.close();
+      configMod.config.host = previousConfig.host;
+      configMod.config.port = previousConfig.port;
+      configMod.config.nginxBin = previousConfig.nginxBin;
+      configMod.config.systemctlBin = previousConfig.systemctlBin;
+      configMod.config.tmuxBin = previousConfig.tmuxBin;
+      configMod.config.scriptBin = previousConfig.scriptBin;
+      installDefaultSaveStateHook(storeMod);
+      installDefaultExecRunner(execMod);
+      await fs.writeFile(statePath, previousState, 'utf-8');
+    }
+  }
+);
+
+test(
+  'desktop config normalizes legacy persisted terminal websocket URLs',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+
+    await fs.mkdir(stateDirFromTmpRoot(), { recursive: true });
+    await fs.writeFile(
+      path.join(stateDirFromTmpRoot(), 'state.json'),
+      JSON.stringify(
+        {
+          desktops: [
+            {
+              id: 'desk-1',
+              label: 'legacy-shell',
+              createdAt: Date.now(),
+              status: 'running',
+              display: 1,
+              vncPort: 5901,
+              wsPort: 6081,
+              cdpPort: 9222,
+              aabPort: 8765,
+              novncUrl: 'https://host.example.com/desktop/1/',
+              aabUrl: 'http://127.0.0.1:8765',
+              workspaceDir: path.join(
+                stateDirFromTmpRoot(),
+                'workspaces',
+                'desk-1'
+              ),
+              terminalSessionName: 'aadm-desk-1',
+              terminalWebsocketPath: '/desktop/1/terminal/ws',
+              terminalWebsocketUrl: 'ws://localhost:8899/desktop/1/terminal/ws',
+              routeAuth: { mode: 'none' }
+            }
+          ]
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const cfg = await app.inject({
+      method: 'GET',
+      url: '/_aadm/desktop/desk-1/config'
+    });
+    assert.equal(cfg.statusCode, 200);
+    const json = cfg.json() as {
+      terminal: { websocketPath: string; websocketUrl: string };
+    };
+    assert.equal(json.terminal.websocketPath, '/_aadm/terminal/desk-1/ws');
+    assert.equal(json.terminal.websocketUrl, '/_aadm/terminal/desk-1/ws');
   }
 );
 
@@ -801,5 +984,58 @@ test(
     );
     assert.doesNotMatch(loggerOutput, /top-secret/);
     assert.doesNotMatch(loggerOutput, /super-secret/);
+  }
+);
+
+test(
+  'browser log ingestion accepts pino browser batches and writes them to the server logger',
+  { concurrency: false },
+  async () => {
+    assert.ok(app);
+
+    const desktops = await app.inject({
+      method: 'GET',
+      url: '/v1/desktops',
+      headers: authHeaders
+    });
+    assert.equal(desktops.statusCode, 200);
+    const desktopId = desktops.json().desktops[0]?.id;
+    assert.equal(typeof desktopId, 'string');
+
+    const config = await app.inject({
+      method: 'GET',
+      url: `/_aadm/desktop/${desktopId}/config`,
+      headers: authHeaders
+    });
+    assert.equal(config.statusCode, 200);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/_aadm/logs',
+      headers: {
+        'content-type': 'application/json',
+        'x-aadm-logs-token': config.json().browserLogsToken
+      },
+      payload: {
+        logs: [
+          {
+            level: 'warn',
+            logEvent: {
+              ts: 123456,
+              level: { label: 'warn', value: 40 },
+              bindings: [{ desktopId }],
+              messages: [{ component: 'terminal' }, 'socket disconnected']
+            }
+          }
+        ]
+      }
+    });
+
+    assert.equal(response.statusCode, 200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.match(loggerOutput, /socket disconnected/);
+    assert.match(loggerOutput, /"browser":true/);
+    assert.match(loggerOutput, new RegExp(`"desktopId":"${desktopId}"`));
+    assert.match(loggerOutput, /"component":"terminal"/);
   }
 );

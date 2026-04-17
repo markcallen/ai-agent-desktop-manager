@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 
 import {
-  buildTerminalWebsocketPath,
-  buildTerminalWebsocketUrl,
+  managerTerminalWebsocketPath,
   ensureTmuxSession,
+  TERMINAL_ENV,
   terminalSessionName,
   workspaceDirForDesktop
 } from '../../src/util/terminal.ts';
@@ -16,21 +16,10 @@ test('terminalSessionName derives a stable tmux session name from the desktop id
   assert.equal(terminalSessionName('desk-7'), 'aadm-desk-7');
 });
 
-test('buildTerminalWebsocketPath uses the desktop path prefix', () => {
+test('managerTerminalWebsocketPath returns the AADM manager path', () => {
   assert.equal(
-    buildTerminalWebsocketPath('/desktop', 7),
-    '/desktop/7/terminal/ws'
-  );
-});
-
-test('buildTerminalWebsocketUrl upgrades the public base url scheme', () => {
-  assert.equal(
-    buildTerminalWebsocketUrl('https://host.example.com', '/desktop', 7),
-    'wss://host.example.com/desktop/7/terminal/ws'
-  );
-  assert.equal(
-    buildTerminalWebsocketUrl('http://127.0.0.1:8899', '/desk', 2),
-    'ws://127.0.0.1:8899/desk/2/terminal/ws'
+    managerTerminalWebsocketPath('desk-7'),
+    '/_aadm/terminal/desk-7/ws'
   );
 });
 
@@ -70,9 +59,6 @@ test('ensureTmuxSession runs tmux with a stable HOME and SHELL', async () => {
     assert.equal(call.cmd.endsWith('tmux'), true);
     assert.equal(call.args[0], '-f');
     assert.equal(call.args[1], '/tmp/aadm-test.tmux.conf');
-    assert.deepEqual(call.env, {
-      HOME: '/var/lib/aadm',
-      SHELL: '/bin/bash'
-    });
+    assert.deepEqual(call.env, TERMINAL_ENV);
   }
 });

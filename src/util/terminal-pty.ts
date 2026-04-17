@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { config } from './config.js';
+import { TERMINAL_ENV } from './terminal.js';
 
 export type TerminalAttachProcess = ChildProcessWithoutNullStreams;
 
@@ -11,6 +12,13 @@ export type TerminalAttachFactory = (opts: {
 
 function shellEscape(value: string) {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export function terminalAttachEnv(baseEnv: NodeJS.ProcessEnv = process.env) {
+  return {
+    ...baseEnv,
+    ...TERMINAL_ENV
+  };
 }
 
 function defaultTerminalAttachFactory({
@@ -29,11 +37,7 @@ function defaultTerminalAttachFactory({
 
   return spawn(config.scriptBin, ['-qfc', command, '/dev/null'], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      HOME: process.env.HOME || '/var/lib/aadm',
-      SHELL: '/bin/bash'
-    }
+    env: terminalAttachEnv()
   });
 }
 

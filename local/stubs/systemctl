@@ -1,0 +1,10 @@
+#!/bin/bash
+# Stub systemctl for local development — always succeeds.
+# VNC, websockify, chrome, and aab units are not managed by systemd in the dev
+# container. The AI agent bridge (aab) runs as a dedicated Docker service instead.
+# is-active returns "active" so the doctor endpoint reports healthy units.
+if [[ "${1:-}" == "is-active" ]]; then
+  echo "active"
+  exit 0
+fi
+exit 0

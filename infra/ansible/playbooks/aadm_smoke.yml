@@ -36,6 +36,13 @@
     aadm_anthropic_api_key: ''
     aadm_openai_api_key: ''
     aadm_gemini_api_key: ''
+    # Set to true to install and run ai-agent-bridge on this host via Docker.
+    # When true, aadm_bridge_addr is automatically set to 127.0.0.1:9445 and
+    # the bridge cert paths are configured in the AADM environment file.
+    aadm_install_bridge: false
+    aadm_bridge_image: ghcr.io/markcallen/ai-agent-bridge:v0.2.0
+    aadm_bridge_install_dir: /opt/ai-agent-bridge
+    aadm_bridge_cert_dir: /opt/ai-agent-bridge/certs
   tasks:
     - name: Wait for cloud-init to finish if present
       ansible.builtin.command:
@@ -332,6 +339,168 @@
         replace: '  ssl_certificate_key {{ aadm_tls_key_path }};'
       notify: Reload aadm nginx
 
+    # ---------------------------------------------------------------------------
+    # ai-agent-bridge (optional — enabled when aadm_install_bridge is true)
+    # ---------------------------------------------------------------------------
+
+    - name: Install Docker prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: true
+      when: aadm_install_bridge | bool
+
+    - name: Add Docker GPG key
+      ansible.builtin.shell: |
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+          -o /etc/apt/keyrings/docker.asc
+        chmod a+r /etc/apt/keyrings/docker.asc
+      args:
+        creates: /etc/apt/keyrings/docker.asc
+      when: aadm_install_bridge | bool
+
+    - name: Add Docker apt repository
+      ansible.builtin.shell: |
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+          https://download.docker.com/linux/ubuntu \
+          $(. /etc/os-release && echo "${VERSION_CODENAME}") stable" \
+          > /etc/apt/sources.list.d/docker.list
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+      when: aadm_install_bridge | bool
+
+    - name: Install Docker Engine
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        update_cache: true
+        state: present
+      when: aadm_install_bridge | bool
+
+    - name: Ensure aadm user is in docker group
+      ansible.builtin.user:
+        name: '{{ aadm_service_user }}'
+        groups: docker
+        append: true
+      when: aadm_install_bridge | bool
+
+    - name: Ensure bridge install directory exists
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0750'
+      loop:
+        - '{{ aadm_bridge_install_dir }}'
+        - '{{ aadm_bridge_install_dir }}/config'
+        - '{{ aadm_bridge_cert_dir }}'
+      when: aadm_install_bridge | bool
+
+    - name: Render bridge configuration
+      ansible.builtin.copy:
+        dest: '{{ aadm_bridge_install_dir }}/config/bridge.yaml'
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0640'
+        content: |
+          server:
+            listen: 0.0.0.0:9445
+          tls:
+            ca_bundle: /app/certs/ca-bundle.crt
+            cert:     /app/certs/server.crt
+            key:      /app/certs/server.key
+          feature_flags:
+            provider_fallbacks: false
+          sessions:
+            max_per_project: 5
+            max_global: 20
+            idle_timeout: 30m
+          providers:
+            - name: claude
+              binary: node
+              args: ["@anthropic-ai/claude-code", "--verbose"]
+              startup_timeout: 60s
+              prompt_pattern: "(?m)(❯|>\\s*$)"
+              required_env: [ANTHROPIC_API_KEY]
+          allowed_paths:
+            - /app/data/workspaces
+            - /tmp
+          logging:
+            format: json
+            level: info
+      when: aadm_install_bridge | bool
+
+    - name: Render bridge environment file
+      ansible.builtin.copy:
+        dest: '{{ aadm_bridge_install_dir }}/.env'
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0640'
+        content: |
+          ANTHROPIC_API_KEY={{ aadm_anthropic_api_key }}
+          OPENAI_API_KEY={{ aadm_openai_api_key }}
+          GEMINI_API_KEY={{ aadm_gemini_api_key }}
+      when: aadm_install_bridge | bool
+
+    - name: Install bridge systemd service
+      ansible.builtin.copy:
+        src: '{{ aadm_install_dir }}/systemd/bridge.service'
+        dest: /etc/systemd/system/bridge.service
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+      when: aadm_install_bridge | bool
+
+    - name: Reload systemd for bridge unit
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when: aadm_install_bridge | bool
+
+    - name: Pull ai-agent-bridge image
+      community.docker.docker_image:
+        name: '{{ aadm_bridge_image }}'
+        source: pull
+      become_user: '{{ aadm_service_user }}'
+      when: aadm_install_bridge | bool
+
+    - name: Enable and start bridge service
+      ansible.builtin.systemd:
+        name: bridge.service
+        enabled: true
+        state: started
+      when: aadm_install_bridge | bool
+
+    - name: Wait for bridge to generate certs and become healthy
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 9445
+        timeout: 60
+      when: aadm_install_bridge | bool
+
+    - name: Set bridge address for AADM when bridge is installed locally
+      ansible.builtin.set_fact:
+        aadm_bridge_addr: '127.0.0.1:9445'
+        aadm_bridge_ca_cert_path: '{{ aadm_bridge_cert_dir }}/ca-bundle.crt'
+        aadm_bridge_client_cert_path: '{{ aadm_bridge_cert_dir }}/client.crt'
+        aadm_bridge_client_key_path: '{{ aadm_bridge_cert_dir }}/client.key'
+      when: aadm_install_bridge | bool
+
+    - name: Set empty bridge cert paths when bridge is not installed
+      ansible.builtin.set_fact:
+        aadm_bridge_ca_cert_path: ''
+        aadm_bridge_client_cert_path: ''
+        aadm_bridge_client_key_path: ''
+      when: not (aadm_install_bridge | bool)
+
     - name: Render manager environment
       ansible.builtin.copy:
         dest: '{{ aadm_install_dir }}/.env'
@@ -360,6 +529,9 @@
           AADM_AAB_PORT_MIN=8765
           AADM_AAB_PORT_MAX=8774
           AADM_BRIDGE_ADDR={{ aadm_bridge_addr }}
+          AADM_BRIDGE_CA_CERT_PATH={{ aadm_bridge_ca_cert_path }}
+          AADM_BRIDGE_CLIENT_CERT_PATH={{ aadm_bridge_client_cert_path }}
+          AADM_BRIDGE_CLIENT_KEY_PATH={{ aadm_bridge_client_key_path }}
           AADM_NGINX_BIN=/usr/sbin/nginx
           AADM_SYSTEMCTL_BIN=/bin/systemctl
           AADM_UNIT_VNC=vnc@

@@ -7,7 +7,9 @@ export async function authHook(req: FastifyRequest, reply: FastifyReply) {
     url.startsWith('/_aadm/access/') ||
     url.startsWith('/_aadm/verify/') ||
     url.startsWith('/_aadm/desktop/') ||
-    url.startsWith('/_aadm/assets/')
+    url.startsWith('/_aadm/assets/') ||
+    url.startsWith('/healthz/') ||
+    url === '/_aadm/logs'
   ) {
     return;
   }

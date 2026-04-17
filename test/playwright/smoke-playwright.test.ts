@@ -113,8 +113,10 @@ async function canvasDimensions(page: Page) {
 }
 
 async function expectTerminalReady(page: Page) {
-  await page.waitForSelector('#terminal-mount');
-  await page.waitForSelector('#agent-terminal-mount');
+  // Use state:'attached' because these mounts are inside hidden tab panels
+  // in the 3-tab layout and are not visible until the Terminal tab is active.
+  await page.waitForSelector('#terminal-mount', { state: 'attached' });
+  await page.waitForSelector('#agent-terminal-mount', { state: 'attached' });
   await page.waitForFunction(
     () => {
       const status = document.querySelector('#terminal-status');
@@ -494,11 +496,14 @@ test(
           });
 
           assert.ok(
-            page.url().endsWith(`/desktop/${desktop.display}/`),
+            page.url().includes(`/desktop/${desktop.display}/`),
             `expected redirect to shell route, got ${page.url()}`
           );
-          await page.waitForSelector('iframe[data-aadm-desktop-frame]');
-          await page.waitForSelector('#terminal-mount');
+          // These elements are in hidden tab panels — use state:'attached'
+          await page.waitForSelector('iframe[data-aadm-desktop-frame]', {
+            state: 'attached'
+          });
+          await page.waitForSelector('#terminal-mount', { state: 'attached' });
           await expectTerminalReady(page);
 
           // Cookie must be set with the correct path
@@ -512,6 +517,8 @@ test(
             `cookie path should start with /desktop/${desktop.display}/`
           );
 
+          // Switch to noVNC tab so the iframe is visible before checking canvas
+          await page.click('[data-tab-btn="novnc"]', { force: true });
           await maybeEnterPassword(page, VNC_PASSWORD);
 
           const dims = await canvasDimensions(page);
@@ -590,10 +597,15 @@ test(
         page.url().includes('/desktop/2/'),
         `expected shell route, got ${page.url()}`
       );
-      await page.waitForSelector('iframe[data-aadm-desktop-frame]');
-      await page.waitForSelector('#terminal-mount');
+      // These elements are in hidden tab panels — use state:'attached'
+      await page.waitForSelector('iframe[data-aadm-desktop-frame]', {
+        state: 'attached'
+      });
+      await page.waitForSelector('#terminal-mount', { state: 'attached' });
       await expectTerminalReady(page);
 
+      // Switch to noVNC tab so the iframe is visible before checking canvas
+      await page.click('[data-tab-btn="novnc"]', { force: true });
       await maybeEnterPassword(page, VNC_PASSWORD);
 
       const dims = await canvasDimensions(page);
@@ -746,6 +758,123 @@ test(
         untrackId(desktop.id);
       }
     );
+  }
+);
+
+// ---------------------------------------------------------------------------
+// 8. 3-tab layout: verify each panel loads correctly via access URL
+// ---------------------------------------------------------------------------
+
+test(
+  'tab layout: AI Agent, Terminal (tmux), and noVNC panels each load correctly',
+  {
+    skip:
+      SKIP || !SMOKE_ACCESS_URL
+        ? SKIP
+          ? SKIP_REASON
+          : 'no SMOKE_ACCESS_URL — skipping tab layout test'
+        : false,
+    timeout: 360_000
+  },
+  async (t) => {
+    await withBrowser(async (ctx) => {
+      const page = await ctx.newPage();
+      await page.goto(SMOKE_ACCESS_URL, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30_000
+      });
+
+      // Confirm redirect to shell route
+      assert.ok(
+        page.url().includes('/desktop/2/'),
+        `expected shell route, got ${page.url()}`
+      );
+
+      // Tab bar must be present with 3 tabs
+      await page.waitForSelector('#aadm-tab-bar', { timeout: 10_000 });
+      const tabCount = await page.evaluate(
+        () => document.querySelectorAll('[data-tab-btn]').length
+      );
+      assert.equal(tabCount, 3, '3 tab buttons present');
+
+      // ----- Tab 1: AI Agent (active by default) ----------------------------
+      await t.test('AI Agent tab: provider and controls visible', async () => {
+        await page.waitForSelector('#agent-status', { timeout: 15_000 });
+        await page.waitForSelector('#agent-terminal-mount', {
+          timeout: 15_000
+        });
+
+        const hasClaudeOption = await page.evaluate(() => {
+          const select = document.querySelector('#agent-provider');
+          if (!(select instanceof HTMLSelectElement)) return false;
+          return Array.from(select.options).some((o) => o.value === 'claude');
+        });
+        assert.ok(hasClaudeOption, 'agent-provider has "claude" option');
+
+        const hasControls = await page.evaluate(
+          () =>
+            Boolean(document.querySelector('#agent-start')) &&
+            Boolean(document.querySelector('#agent-stop'))
+        );
+        assert.ok(hasControls, 'agent start/stop buttons present');
+      });
+
+      // ----- Tab 2: Terminal (tmux) -----------------------------------------
+      await t.test(
+        'Terminal tab: tmux attaches with at least 1 window',
+        async () => {
+          // Use force:true to bypass stability check — xterm initialization can
+          // briefly cause layout shifts that make the tab bar "not stable".
+          await page.click('[data-tab-btn="terminal"]', { force: true });
+          await page.waitForSelector('#terminal-mount', { timeout: 15_000 });
+
+          // Wait for tmux to attach AND confirm the session name in one function
+          // so there is no race between the waitForFunction and a subsequent evaluate.
+          await page.waitForFunction(
+            () => {
+              const status = document.querySelector('#terminal-status');
+              if (!(status instanceof HTMLElement)) return false;
+              const text = status.textContent ?? '';
+              return (
+                /attached to tmux session/i.test(text) &&
+                /aadm-desk/i.test(text)
+              );
+            },
+            undefined,
+            { timeout: 60_000 }
+          );
+
+          // xterm rendered inside mount
+          await page.waitForSelector('#terminal-mount .xterm', {
+            timeout: 15_000
+          });
+        }
+      );
+
+      // ----- Tab 3: noVNC (Chrome desktop) ----------------------------------
+      await t.test(
+        'noVNC tab: iframe canvas renders Chrome desktop',
+        async () => {
+          await page.click('[data-tab-btn="novnc"]', { force: true });
+
+          const frameHandle = await page.waitForSelector(
+            'iframe[data-aadm-desktop-frame]',
+            { state: 'attached', timeout: 15_000 }
+          );
+          const frame = await frameHandle.contentFrame();
+          assert.ok(frame, 'contentFrame available');
+
+          // Enter VNC password if needed and wait for canvas
+          await maybeEnterPassword(page, VNC_PASSWORD);
+
+          const dims = await canvasDimensions(page);
+          assert.ok(
+            dims && dims.w > 0 && dims.h > 0,
+            `noVNC canvas rendered ${JSON.stringify(dims)}`
+          );
+        }
+      );
+    });
   }
 );
 

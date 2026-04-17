@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSnippet } from '../../src/util/nginx.ts';
+import { buildSnippet, buildGlobalSnippet } from '../../src/util/nginx.ts';
 
 test('buildSnippet generates redirect and websocket-safe location blocks', () => {
   const snippet = buildSnippet('desk-3', 3, 6083);
@@ -16,19 +16,11 @@ test('buildSnippet generates redirect and websocket-safe location blocks', () =>
   assert.match(snippet, /proxy_set_header Connection "upgrade";/);
   assert.match(snippet, /proxy_read_timeout 7d;/);
   assert.match(snippet, /proxy_send_timeout 7d;/);
-  assert.match(
-    snippet,
-    /location = \/desktop\/3\/terminal\/ws \{\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/terminal\/desk-3\/ws;/
-  );
-  assert.match(
-    snippet,
-    /location = \/desktop\/3\/bridge\/ws \{\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/bridge\/desk-3\/ws;/
-  );
-  assert.match(
-    snippet,
-    /location \^~ \/desktop\/3\/assets\/ \{\n {2}rewrite \^\/desktop\/3\/assets\/\(\.\*\)\$ \/_aadm\/assets\/\$1 break;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899;/
-  );
+  // Terminal and bridge websockets are now handled by global /_aadm/ location
+  assert.doesNotMatch(snippet, /terminal\/ws/);
+  assert.doesNotMatch(snippet, /bridge\/ws/);
   assert.doesNotMatch(snippet, /auth_request/);
+  assert.doesNotMatch(snippet, /_aadm\/assets/);
 });
 
 test('buildSnippet can protect a route with auth_request', () => {
@@ -57,18 +49,10 @@ test('buildSnippet can protect a route with auth_request', () => {
     snippet,
     /location = \/desktop\/3\/ \{\n {2}auth_request \/_aadm\/auth\/desk-3;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/desktop\/desk-3;/
   );
-  assert.match(
-    snippet,
-    /location = \/desktop\/3\/terminal\/ws \{\n {2}auth_request \/_aadm\/auth\/desk-3;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/terminal\/desk-3\/ws;/
-  );
-  assert.match(
-    snippet,
-    /location = \/desktop\/3\/bridge\/ws \{\n {2}auth_request \/_aadm\/auth\/desk-3;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/bridge\/desk-3\/ws;/
-  );
-  assert.match(
-    snippet,
-    /location \^~ \/desktop\/3\/assets\/ \{\n {2}auth_request \/_aadm\/auth\/desk-3;\n {2}rewrite \^\/desktop\/3\/assets\/\(\.\*\)\$ \/_aadm\/assets\/\$1 break;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899;/
-  );
+  // Terminal and bridge websockets are now handled by global /_aadm/ location
+  assert.doesNotMatch(snippet, /terminal\/ws/);
+  assert.doesNotMatch(snippet, /bridge\/ws/);
+  assert.doesNotMatch(snippet, /_aadm\/assets/);
 });
 
 test('buildSnippet can protect a route with manager token verification', () => {
@@ -94,16 +78,24 @@ test('buildSnippet can protect a route with manager token verification', () => {
     snippet,
     /location = \/desktop\/4\/ \{\n {2}auth_request \/_aadm\/auth\/desk-4;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/desktop\/desk-4;/
   );
+  // Terminal and bridge websockets are now handled by global /_aadm/ location
+  assert.doesNotMatch(snippet, /terminal\/ws/);
+  assert.doesNotMatch(snippet, /bridge\/ws/);
+  assert.doesNotMatch(snippet, /_aadm\/assets/);
+});
+
+test('buildGlobalSnippet generates /_aadm/desktop-app/ and /_aadm/ proxy locations', () => {
+  const snippet = buildGlobalSnippet();
+  // Vite assets location
+  assert.match(snippet, /location \^~ \/_aadm\/desktop-app\//);
   assert.match(
     snippet,
-    /location = \/desktop\/4\/terminal\/ws \{\n {2}auth_request \/_aadm\/auth\/desk-4;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/terminal\/desk-4\/ws;/
+    /proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/desktop-app\/;/
   );
-  assert.match(
-    snippet,
-    /location = \/desktop\/4\/bridge\/ws \{\n {2}auth_request \/_aadm\/auth\/desk-4;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/bridge\/desk-4\/ws;/
-  );
-  assert.match(
-    snippet,
-    /location \^~ \/desktop\/4\/assets\/ \{\n {2}auth_request \/_aadm\/auth\/desk-4;\n {2}rewrite \^\/desktop\/4\/assets\/\(\.\*\)\$ \/_aadm\/assets\/\$1 break;\n {2}proxy_pass http:\/\/127\.0\.0\.1:8899;/
-  );
+  // Catch-all /_aadm/ location with WebSocket headers
+  assert.match(snippet, /location \^~ \/_aadm\//);
+  assert.match(snippet, /proxy_pass http:\/\/127\.0\.0\.1:8899\/_aadm\/;/);
+  assert.match(snippet, /proxy_set_header Upgrade \$http_upgrade;/);
+  assert.match(snippet, /proxy_set_header Connection "upgrade";/);
+  assert.match(snippet, /proxy_read_timeout 7d;/);
 });

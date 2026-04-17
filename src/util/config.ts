@@ -64,7 +64,9 @@ export const Config = z.object({
   unitVnc: z.string().default('vnc@'),
   unitWebsockify: z.string().default('websockify@'),
   unitChrome: z.string().default('chrome@'),
-  unitAab: z.string().default('aab@')
+  unitAab: z.string().default('aab@'),
+
+  viteDevUrl: z.string().url().optional()
 });
 
 export const config = Config.parse({
@@ -124,7 +126,9 @@ export const config = Config.parse({
   unitVnc: process.env.AADM_UNIT_VNC ?? 'vnc@',
   unitWebsockify: process.env.AADM_UNIT_WEBSOCKIFY ?? 'websockify@',
   unitChrome: process.env.AADM_UNIT_CHROME ?? 'chrome@',
-  unitAab: process.env.AADM_UNIT_AAB ?? 'aab@'
+  unitAab: process.env.AADM_UNIT_AAB ?? 'aab@',
+
+  viteDevUrl: process.env.AADM_VITE_DEV_URL || undefined
 });
 
 function validateConfig() {

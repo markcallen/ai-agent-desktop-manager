@@ -2,6 +2,7 @@ node_modules
 dist
 artifacts
 data
+certs
 .env
 .env.smoke.local
 .DS_Store

@@ -1,0 +1,33 @@
+[Unit]
+Description=ai-agent-bridge
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=aadm
+Group=aadm
+EnvironmentFile=/opt/ai-agent-bridge/.env
+ExecStartPre=-/usr/bin/docker stop ai-agent-bridge
+ExecStartPre=-/usr/bin/docker rm ai-agent-bridge
+ExecStart=/usr/bin/docker run \
+  --name ai-agent-bridge \
+  --rm \
+  -p 127.0.0.1:9445:9445 \
+  -v /opt/ai-agent-bridge/certs:/app/certs \
+  -v /opt/ai-agent-bridge/config/bridge.yaml:/app/config/bridge.yaml:ro \
+  -v /opt/ai-agent-desktop-manager/data:/app/data \
+  -e BRIDGE_CONFIG=/app/config/bridge.yaml \
+  -e BRIDGE_CN=bridge \
+  -e BRIDGE_SANS=bridge,localhost,127.0.0.1 \
+  -e BRIDGE_CLIENT_CN=client \
+  -e ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-} \
+  -e OPENAI_API_KEY=${OPENAI_API_KEY:-} \
+  -e GEMINI_API_KEY=${GEMINI_API_KEY:-} \
+  ghcr.io/markcallen/ai-agent-bridge:v0.2.0
+ExecStop=/usr/bin/docker stop ai-agent-bridge
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

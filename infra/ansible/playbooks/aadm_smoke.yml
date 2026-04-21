@@ -33,13 +33,19 @@
     # when the bridge is deployed alongside AADM on this host.
     aadm_bridge_addr: ''
     # API keys forwarded to the bridge process environment (only used when bridge is deployed).
+    # Ignored when aadm_secrets_manager_arn is set — keys are fetched from Secrets Manager instead.
     aadm_anthropic_api_key: ''
     aadm_openai_api_key: ''
     aadm_gemini_api_key: ''
     # Set to true to install and run ai-agent-bridge on this host via Docker.
     # When true, aadm_bridge_addr is automatically set to 127.0.0.1:9445 and
     # the bridge cert paths are configured in the AADM environment file.
+    # Automatically set to true when aadm_secrets_manager_arn is provided.
     aadm_install_bridge: false
+    # ARN of an AWS Secrets Manager secret containing bridge API keys.
+    # When set, aadm_install_bridge is forced to true and the API keys are
+    # fetched from the secret (JSON keys: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY).
+    aadm_secrets_manager_arn: ''
     aadm_bridge_image: ghcr.io/markcallen/ai-agent-bridge:v0.2.0
     aadm_bridge_install_dir: /opt/ai-agent-bridge
     aadm_bridge_cert_dir: /opt/ai-agent-bridge/certs
@@ -340,8 +346,14 @@
       notify: Reload aadm nginx
 
     # ---------------------------------------------------------------------------
-    # ai-agent-bridge (optional — enabled when aadm_install_bridge is true)
+    # ai-agent-bridge (optional — enabled when aadm_install_bridge is true,
+    # or automatically when aadm_secrets_manager_arn is provided)
     # ---------------------------------------------------------------------------
+
+    - name: Enable bridge when Secrets Manager ARN is provided
+      ansible.builtin.set_fact:
+        aadm_install_bridge: true
+      when: aadm_secrets_manager_arn | length > 0
 
     - name: Install Docker prerequisites
       ansible.builtin.apt:
@@ -391,17 +403,24 @@
         append: true
       when: aadm_install_bridge | bool
 
+    - name: Ensure ubuntu user is in docker group
+      ansible.builtin.user:
+        name: ubuntu
+        groups: docker
+        append: true
+      when: aadm_install_bridge | bool
+
     - name: Ensure bridge install directory exists
       ansible.builtin.file:
-        path: '{{ item }}'
+        path: '{{ item.path }}'
         state: directory
         owner: '{{ aadm_service_user }}'
         group: '{{ aadm_service_group }}'
-        mode: '0750'
+        mode: '{{ item.mode }}'
       loop:
-        - '{{ aadm_bridge_install_dir }}'
-        - '{{ aadm_bridge_install_dir }}/config'
-        - '{{ aadm_bridge_cert_dir }}'
+        - { path: '{{ aadm_bridge_install_dir }}', mode: '0750' }
+        - { path: '{{ aadm_bridge_install_dir }}/config', mode: '0750' }
+        - { path: '{{ aadm_bridge_cert_dir }}', mode: '0755' }
       when: aadm_install_bridge | bool
 
     - name: Render bridge configuration
@@ -409,7 +428,7 @@
         dest: '{{ aadm_bridge_install_dir }}/config/bridge.yaml'
         owner: '{{ aadm_service_user }}'
         group: '{{ aadm_service_group }}'
-        mode: '0640'
+        mode: '0644'
         content: |
           server:
             listen: 0.0.0.0:9445
@@ -438,6 +457,30 @@
             level: info
       when: aadm_install_bridge | bool
 
+    - name: Fetch bridge API keys from Secrets Manager
+      ansible.builtin.command:
+        cmd: >-
+          aws secretsmanager get-secret-value
+          --secret-id {{ aadm_secrets_manager_arn }}
+          --query SecretString
+          --output text
+      delegate_to: localhost
+      become: false
+      register: aadm_secrets_manager_raw
+      changed_when: false
+      when:
+        - aadm_install_bridge | bool
+        - aadm_secrets_manager_arn | length > 0
+
+    - name: Set API key facts from Secrets Manager secret
+      ansible.builtin.set_fact:
+        aadm_anthropic_api_key: "{{ (aadm_secrets_manager_raw.stdout | from_json).ANTHROPIC_API_KEY | default('') }}"
+        aadm_openai_api_key: "{{ (aadm_secrets_manager_raw.stdout | from_json).OPENAI_API_KEY | default('') }}"
+        aadm_gemini_api_key: "{{ (aadm_secrets_manager_raw.stdout | from_json).GEMINI_API_KEY | default('') }}"
+      when:
+        - aadm_install_bridge | bool
+        - aadm_secrets_manager_arn | length > 0
+
     - name: Render bridge environment file
       ansible.builtin.copy:
         dest: '{{ aadm_bridge_install_dir }}/.env'
@@ -465,6 +508,18 @@
         daemon_reload: true
       when: aadm_install_bridge | bool
 
+    - name: Ensure AADM state and workspace directories are pre-created with correct ownership
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0755'
+      loop:
+        - '{{ aadm_state_dir }}'
+        - '{{ aadm_state_dir }}/workspaces'
+      when: aadm_install_bridge | bool
+
     - name: Pull ai-agent-bridge image
       community.docker.docker_image:
         name: '{{ aadm_bridge_image }}'
@@ -479,11 +534,23 @@
         state: started
       when: aadm_install_bridge | bool
 
-    - name: Wait for bridge to generate certs and become healthy
+    - name: Wait for bridge gRPC port to open
       ansible.builtin.wait_for:
         host: 127.0.0.1
         port: 9445
+        timeout: 120
+      when: aadm_install_bridge | bool
+
+    - name: Wait for bridge to write client cert to host volume
+      ansible.builtin.wait_for:
+        path: '{{ aadm_bridge_cert_dir }}/client.crt'
         timeout: 60
+      when: aadm_install_bridge | bool
+
+    - name: Wait for bridge to write CA bundle to host volume
+      ansible.builtin.wait_for:
+        path: '{{ aadm_bridge_cert_dir }}/ca-bundle.crt'
+        timeout: 30
       when: aadm_install_bridge | bool
 
     - name: Set bridge address for AADM when bridge is installed locally

@@ -21,23 +21,26 @@ WEB_INGRESS_CIDR="${SMOKE_WEB_INGRESS_CIDR:-}"
 PUBLIC_WEB_INGRESS="${SMOKE_PUBLIC_WEB_INGRESS:-false}"
 TLS_STAGING="${SMOKE_TLS_STAGING:-false}"
 DESTROY_DESKTOP="${SMOKE_DESTROY_DESKTOP:-false}"
+SECRETS_MANAGER_ARN="${SMOKE_SECRETS_MANAGER_ARN:-}"
 STACK_ATTEMPTED="false"
 DESTROY_MODE="always"
 ACTION="run"
+RUN_TESTS="true"
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [run|status] [--destroy] [--keep-alive]
+Usage: $(basename "$0") [run|status] [--destroy] [--keep-alive] [--provision-only]
 
 Provision an EC2 smoke environment, run the Playwright smoke test remotely,
 and optionally destroy the stack afterward.
 
 Options:
-  run           Provision EC2 and execute the smoke test (default)
-  status        Print the saved access/debug commands for the current smoke stack
-  --destroy     Destroy the EC2 smoke stack on exit, even when the test fails (default)
-  --keep-alive  Leave the EC2 smoke stack running for manual debugging
-  -h, --help    Show this help
+  run              Provision EC2 and execute the smoke test (default)
+  status           Print the saved access/debug commands for the current smoke stack
+  --destroy        Destroy the EC2 smoke stack on exit, even when the test fails (default)
+  --keep-alive     Leave the EC2 smoke stack running for manual debugging
+  --provision-only Provision the EC2 stack without running the smoke test; implies --keep-alive
+  -h, --help       Show this help
 
 Required environment variables:
   SMOKE_AWS_REGION   AWS region to provision in
@@ -45,14 +48,17 @@ Required environment variables:
   SMOKE_TLS_EMAIL    Email used for certbot registration
 
 Optional environment variables:
-  SMOKE_INSTANCE_TYPE       EC2 instance type
-  SMOKE_NAME_PREFIX         AWS resource name prefix
-  SMOKE_SPOT_MAX_PRICE      Spot max price
-  SMOKE_AAB_NPM_PACKAGE     ai-agent-browser package name
-  SMOKE_WEB_INGRESS_CIDR    Override HTTPS ingress CIDR
-  SMOKE_PUBLIC_WEB_INGRESS  Set to true to open 80/443 publicly
-  SMOKE_TLS_STAGING         Set to true to use Let's Encrypt staging
-  SMOKE_DESTROY_DESKTOP     Set to true to destroy the seeded desktop after verification
+  SMOKE_INSTANCE_TYPE         EC2 instance type
+  SMOKE_NAME_PREFIX           AWS resource name prefix
+  SMOKE_SPOT_MAX_PRICE        Spot max price
+  SMOKE_AAB_NPM_PACKAGE       ai-agent-browser package name
+  SMOKE_WEB_INGRESS_CIDR      Override HTTPS ingress CIDR
+  SMOKE_PUBLIC_WEB_INGRESS    Set to true to open 80/443 publicly
+  SMOKE_TLS_STAGING           Set to true to use Let's Encrypt staging
+  SMOKE_DESTROY_DESKTOP       Set to true to destroy the seeded desktop after verification
+  SMOKE_SECRETS_MANAGER_ARN   ARN of a Secrets Manager secret containing bridge API keys;
+                              when set the ai-agent-bridge is installed automatically
+                              (JSON keys: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY)
 EOF
 }
 
@@ -169,6 +175,11 @@ while [[ $# -gt 0 ]]; do
       DESTROY_MODE="manual"
       shift
       ;;
+    --provision-only)
+      DESTROY_MODE="manual"
+      RUN_TESTS="false"
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -229,12 +240,29 @@ if [[ "$DESTROY_DESKTOP" == "true" ]]; then
   ec2_args+=(--destroy-desktop)
 fi
 
+if [[ -n "$SECRETS_MANAGER_ARN" ]]; then
+  ec2_args+=(--secrets-manager-arn "$SECRETS_MANAGER_ARN")
+fi
+
 echo "smoke-ec2: provisioning EC2 smoke environment in ${AWS_REGION}..." >&2
 STACK_ATTEMPTED="true"
 bash "$EC2_SMOKE_SCRIPT" "${ec2_args[@]}"
 
-echo "smoke-ec2: running remote Playwright smoke test..." >&2
-bash "$PLAYWRIGHT_SMOKE_SCRIPT" --test
+if [[ "$RUN_TESTS" == "true" ]]; then
+  echo "smoke-ec2: running remote Playwright smoke test..." >&2
+  playwright_args=(--test)
+  if [[ "$DESTROY_MODE" == "manual" ]]; then
+    playwright_args+=(--keep-alive)
+  fi
+  bash "$PLAYWRIGHT_SMOKE_SCRIPT" "${playwright_args[@]}"
+
+  echo "SMOKE TEST PASSED"
+
+  echo ""
+  echo "Reports:"
+  echo "  Summary : $RUNTIME_DIR/aadm-smoke-summary.json"
+  echo "  SSH key : $KEY_PATH"
+fi
 
 if [[ "$DESTROY_MODE" == "manual" ]]; then
   cat >&2 <<EOF
@@ -243,5 +271,3 @@ Destroy it manually with:
   ./scripts/ec2-smoke-test.sh destroy --region ${AWS_REGION}
 EOF
 fi
-
-echo "SMOKE TEST PASSED"

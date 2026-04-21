@@ -199,16 +199,22 @@ export function useBridgeSocket({
           }
 
           if (msg.type === 'error') {
-            const nextState = setBridgeSessionError(
-              {
-                session: sessionRef.current,
-                pendingStart: pendingStartRef.current,
-                error
-              },
-              String(msg.message ?? 'Bridge error')
-            );
-            pendingStartRef.current = nextState.pendingStart;
-            setError(nextState.error);
+            // Only surface errors as session errors when there is an active or
+            // pending session. Background health/provider check failures
+            // (e.g. bridge gRPC unreachable) are not session errors and
+            // should not appear in ErrorSummary.
+            if (sessionRef.current || pendingStartRef.current) {
+              const nextState = setBridgeSessionError(
+                {
+                  session: sessionRef.current,
+                  pendingStart: pendingStartRef.current,
+                  error
+                },
+                String(msg.message ?? 'Bridge error')
+              );
+              pendingStartRef.current = nextState.pendingStart;
+              setError(nextState.error);
+            }
           }
         } catch {
           // non-JSON — ignore

@@ -23,7 +23,7 @@ export function HealthStatus({ connectionStatus, health, providers }: Props) {
       style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}
     >
       {/* WebSocket connection */}
-      <div className="flex items-center gap-1.5">
+      <div id="agent-status" className="flex items-center gap-1.5">
         <span
           className={`w-2 h-2 rounded-full ${CONNECTION_COLORS[connectionStatus]}`}
         />

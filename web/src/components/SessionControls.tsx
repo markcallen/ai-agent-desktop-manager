@@ -39,6 +39,7 @@ export function SessionControls({
     >
       {/* Provider selector */}
       <select
+        id="agent-provider"
         value={provider}
         onChange={(e) => onProviderChange(e.target.value)}
         disabled={hasSession}

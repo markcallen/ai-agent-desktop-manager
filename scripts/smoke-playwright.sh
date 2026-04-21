@@ -17,6 +17,7 @@ SMOKE_HOST=""
 SSH_PID=""
 VERIFIER_PID=""
 AADM_RECONFIGURED=false
+KEEP_ALIVE=false
 
 usage() {
   cat <<EOF
@@ -27,6 +28,7 @@ Options:
   --screenshot <path>             Screenshot output path
   --ignore-https-errors <bool>    Pass through to the browser smoke script (default: false)
   --test                          Run the full Playwright smoke test suite
+  --keep-alive                    Leave the SSH tunnel running after the test for debugging
   -h, --help                      Show this help
 EOF
 }
@@ -59,7 +61,11 @@ function smoke_test_cleanup() {
     kill "$VERIFIER_PID" 2>/dev/null || true
   fi
 
-  if [[ -n "$SSH_PID" ]]; then
+  if [[ "$KEEP_ALIVE" == "true" && -n "$SSH_PID" ]]; then
+    echo "smoke-playwright: SSH tunnel kept alive (PID $SSH_PID)." >&2
+    echo "  Manager accessible at: http://127.0.0.1:${TUNNEL_MANAGER_LOCAL}" >&2
+    echo "  Kill tunnel with: kill $SSH_PID" >&2
+  elif [[ -n "$SSH_PID" ]]; then
     kill "$SSH_PID" 2>/dev/null || true
   fi
 }
@@ -139,7 +145,34 @@ function run_playwright_test() {
   wait_for_local_port "$TUNNEL_MANAGER_LOCAL" 20 || exit 1
 
   # -------------------------------------------------------------------------
-  # 5. Update aadm .env with mock verifier URL and restart the service
+  # 5. Verify the reverse tunnel is usable from EC2 before reconfiguring aadm.
+  #    Without this check, aadm restarts and nginx immediately fires an
+  #    auth_request to EC2:9999, losing the race against the tunnel warm-up
+  #    and producing "channel N: open failed: connect failed: Connection refused".
+  # -------------------------------------------------------------------------
+  echo "smoke-playwright: verifying reverse tunnel to mock verifier..." >&2
+  local tunnel_ok=false
+  for _ in $(seq 1 20); do
+    if ssh \
+        -i "$KEY_PATH" \
+        -o BatchMode=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=5 \
+        ubuntu@"$SMOKE_HOST" \
+        'curl -sf http://127.0.0.1:9999/health' > /dev/null 2>&1; then
+      tunnel_ok=true
+      break
+    fi
+    sleep 2
+  done
+  if [[ "$tunnel_ok" != "true" ]]; then
+    echo "smoke-playwright: reverse tunnel to mock verifier did not become reachable" >&2
+    exit 1
+  fi
+
+  # -------------------------------------------------------------------------
+  # 6. Update aadm .env with mock verifier URL and restart the service
   # -------------------------------------------------------------------------
   echo "smoke-playwright: configuring aadm auth_request URL on EC2..." >&2
   ssh \
@@ -156,10 +189,42 @@ function run_playwright_test() {
      sudo systemctl restart aadm.service'
   AADM_RECONFIGURED=true
 
+  # Stop any orphaned desktop systemd units left over from a previous smoke run.
+  # These survive aadm restarts because systemd manages them independently.
+  # Display 2 (desk-2) is the managed desktop and must not be stopped.
+  echo "smoke-playwright: stopping orphaned desktop units from previous runs..." >&2
+  ssh \
+    -i "$KEY_PATH" \
+    -o BatchMode=yes \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    ubuntu@"$SMOKE_HOST" \
+    'for prefix in vnc websockify chrome aab; do
+       units=$(systemctl list-units --no-legend --state=active "${prefix}@*" 2>/dev/null \
+               | awk "{print \$1}" \
+               | grep -v "^${prefix}@2\.service$" || true)
+       [ -n "$units" ] && sudo systemctl stop $units 2>/dev/null || true
+     done' 2>/dev/null || true
+
+  # Wait on EC2 itself for aadm to be listening before we poll via the forward
+  # tunnel. Curling through the tunnel while aadm is still down causes SSH to
+  # emit "channel N: open failed: connect failed: Connection refused".
+  echo "smoke-playwright: waiting for aadm to start on EC2..." >&2
+  ssh \
+    -i "$KEY_PATH" \
+    -o BatchMode=yes \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    ubuntu@"$SMOKE_HOST" \
+    "timeout 60 bash -c 'until curl -sf http://127.0.0.1:8899/health > /dev/null 2>&1; do sleep 1; done'" || {
+    echo "smoke-playwright: aadm did not start in time on EC2" >&2
+    exit 1
+  }
+
   wait_for_manager_health 15 || exit 1
 
   # -------------------------------------------------------------------------
-  # 6. Mint a fresh access URL for the desktop from the summary (if present)
+  # 7. Mint a fresh access URL for the desktop from the summary (if present)
   # -------------------------------------------------------------------------
   local smoke_access_url=""
   local smoke_vnc_password=""
@@ -182,7 +247,7 @@ function run_playwright_test() {
   fi
 
   # -------------------------------------------------------------------------
-  # 7. Run the Playwright test suite
+  # 8. Run the Playwright test suite
   # -------------------------------------------------------------------------
   echo "smoke-playwright: running test suite..." >&2
   local exit_code=0
@@ -219,6 +284,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --test)
       RUN_PLAYWRIGHT_TEST="true"
+      shift
+      ;;
+    --keep-alive)
+      KEEP_ALIVE="true"
       shift
       ;;
     -h|--help)

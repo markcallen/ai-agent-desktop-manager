@@ -19,7 +19,6 @@ export function TerminalPanel({ config }: Props) {
   const termRef = useRef<TerminalHandle>(null);
   const [statusMsg, setStatusMsg] = useState('Connecting to tmux session…');
   const [isError, setIsError] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const handleOutput = useCallback((data: Uint8Array) => {
     termRef.current?.write(data);
@@ -35,14 +34,6 @@ export function TerminalPanel({ config }: Props) {
     onOutput: handleOutput,
     onStatus: handleStatus
   });
-
-  const copyUrl = async () => {
-    await navigator.clipboard
-      .writeText(terminalWebsocketUrl)
-      .catch(() => undefined);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
 
   // When this tab becomes visible, refit the terminal
   const containerRef = useRef<HTMLDivElement>(null);
@@ -88,40 +79,6 @@ export function TerminalPanel({ config }: Props) {
           }}
         />
         {statusMsg}
-      </div>
-
-      {/* WebSocket URL row */}
-      <div
-        className="flex items-center gap-2 px-3 py-1.5 shrink-0 border-b"
-        style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
-      >
-        <span
-          className="text-[10px] uppercase shrink-0"
-          style={{ fontFamily: 'var(--font-mono)', color: 'var(--ink-dim)' }}
-        >
-          ws
-        </span>
-        <input
-          readOnly
-          value={terminalWebsocketUrl}
-          className="flex-1 min-w-0 bg-transparent text-[11px] outline-none truncate"
-          style={{ fontFamily: 'var(--font-mono)', color: 'var(--ink-muted)' }}
-          aria-label="Terminal websocket url"
-        />
-        <button
-          type="button"
-          onClick={copyUrl}
-          className="text-[10px] px-2 py-0.5 border shrink-0 transition-colors"
-          style={{
-            fontFamily: 'var(--font-mono)',
-            color: copied ? 'var(--accent)' : 'var(--ink-muted)',
-            borderColor: 'var(--border)',
-            background: 'transparent',
-            cursor: 'pointer'
-          }}
-        >
-          {copied ? 'copied' : 'copy'}
-        </button>
       </div>
 
       {/* Terminal */}

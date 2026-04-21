@@ -26,6 +26,17 @@ test('bridge service mounts the production workspace root at the same path', asy
   );
 });
 
+test('bridge service expands API key env vars before passing them to docker', async () => {
+  const unit = await readRepoFile('systemd/bridge.service');
+
+  assert.match(unit, /-e ANTHROPIC_API_KEY=\$\{ANTHROPIC_API_KEY\} \\/);
+  assert.match(unit, /-e OPENAI_API_KEY=\$\{OPENAI_API_KEY\} \\/);
+  assert.match(unit, /-e GEMINI_API_KEY=\$\{GEMINI_API_KEY\} \\/);
+  assert.doesNotMatch(unit, /-e ANTHROPIC_API_KEY=\$ANTHROPIC_API_KEY \\/);
+  assert.doesNotMatch(unit, /-e OPENAI_API_KEY=\$OPENAI_API_KEY \\/);
+  assert.doesNotMatch(unit, /-e GEMINI_API_KEY=\$GEMINI_API_KEY \\/);
+});
+
 test('smoke playbook renders the production workspace root into bridge allowed paths', async () => {
   const playbook = await readRepoFile('infra/ansible/playbooks/aadm_smoke.yml');
 

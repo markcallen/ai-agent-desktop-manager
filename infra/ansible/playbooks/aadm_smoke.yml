@@ -808,6 +808,25 @@
           stdout="{{ aadm_bridge_service_status.stdout | trim }}"
       when: aadm_install_bridge | bool
 
+    - name: Inspect bridge container API key environment after smoke provisioning
+      ansible.builtin.command:
+        cmd: >-
+          docker exec ai-agent-bridge /usr/bin/env
+      register: aadm_bridge_container_env
+      changed_when: false
+      when: aadm_install_bridge | bool
+
+    - name: Assert bridge container received expanded API key values
+      ansible.builtin.assert:
+        that:
+          - "'ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY' not in aadm_bridge_container_env.stdout"
+          - "'OPENAI_API_KEY=$OPENAI_API_KEY' not in aadm_bridge_container_env.stdout"
+          - "'GEMINI_API_KEY=$GEMINI_API_KEY' not in aadm_bridge_container_env.stdout"
+        fail_msg: >-
+          ai-agent-bridge container still has literal API key placeholders in its environment.
+          bridge.service did not expand one or more provider API key variables before docker run.
+      when: aadm_install_bridge | bool
+
     - name: Destroy smoke desktop when requested
       ansible.builtin.uri:
         url: 'http://127.0.0.1:8899/v1/desktops/{{ aadm_create.json.id }}'

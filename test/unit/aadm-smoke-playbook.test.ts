@@ -109,3 +109,24 @@ test('smoke playbook clears previous smoke-test desktops before creating a new o
     /- name: Create smoke desktop[\s\S]*owner: smoke-test[\s\S]*label: ubuntu-24-spot/
   );
 });
+
+test('smoke playbook verifies bridge container API keys are not left as literal placeholders', () => {
+  const playbook = fs.readFileSync(playbookPath, 'utf8');
+
+  assert.match(
+    playbook,
+    /- name: Inspect bridge container API key environment after smoke provisioning[\s\S]*docker exec ai-agent-bridge \/usr\/bin\/env/
+  );
+  assert.match(
+    playbook,
+    /- name: Assert bridge container received expanded API key values[\s\S]*'ANTHROPIC_API_KEY=\$ANTHROPIC_API_KEY' not in aadm_bridge_container_env\.stdout/
+  );
+  assert.match(
+    playbook,
+    /'OPENAI_API_KEY=\$OPENAI_API_KEY' not in aadm_bridge_container_env\.stdout/
+  );
+  assert.match(
+    playbook,
+    /'GEMINI_API_KEY=\$GEMINI_API_KEY' not in aadm_bridge_container_env\.stdout/
+  );
+});

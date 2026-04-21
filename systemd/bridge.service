@@ -22,9 +22,9 @@ ExecStart=/usr/bin/docker run \
   -e BRIDGE_CN=bridge \
   -e BRIDGE_SANS=bridge,localhost,127.0.0.1 \
   -e BRIDGE_CLIENT_CN=client \
-  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
-  -e GEMINI_API_KEY=$GEMINI_API_KEY \
+  -e ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} \
+  -e OPENAI_API_KEY=${OPENAI_API_KEY} \
+  -e GEMINI_API_KEY=${GEMINI_API_KEY} \
   ghcr.io/markcallen/ai-agent-bridge:v0.2.0
 ExecStop=/usr/bin/docker stop ai-agent-bridge
 Restart=on-failure

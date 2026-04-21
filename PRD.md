@@ -93,6 +93,7 @@ Base: `http://127.0.0.1:8899`
 - The managed terminal session and terminal attach process must provide a clear-capable terminal type so shell startup scripts that invoke `clear` do not fail the Terminal tab.
 - When `ai-agent-bridge` is enabled, its runtime configuration must allow the manager-owned workspace root `/opt/ai-agent-desktop-manager/data/workspaces` and mount that same absolute path inside the bridge container so session `repo_path` validation and process working directories agree.
 - The Ansible deployment flow for `ai-agent-bridge` must ensure the Docker daemon is enabled before the bridge unit starts, and must restart the bridge unit whenever the shipped unit file, bridge config, or bridge environment file changes.
+- The shipped `bridge.service` unit must expand API key values from `/opt/ai-agent-bridge/.env` before invoking `docker run`, so the container receives concrete provider credentials rather than literal placeholder strings.
 - The final Ansible smoke verification must assert that `docker`, `aadm.service`, and `nginx` are active, and must also assert `bridge.service` is active when the bridge deployment path is enabled.
 - The browser desktop shell must use a Pino-based logger for browser-side diagnostics.
 - Browser logging must capture `console.log`, `console.info`, `console.debug`, `console.warn`, `console.error`, uncaught errors, and unhandled promise rejections.
@@ -105,6 +106,8 @@ Base: `http://127.0.0.1:8899`
   - Given a shell profile or terminal helper that invokes `clear`, opening the Terminal tab still attaches successfully because the tmux session and attach wrapper both expose a non-dumb `TERM`.
   - Given the bridge receives `repo_path` `/opt/ai-agent-desktop-manager/data/workspaces/<desktop-id>`, session startup succeeds because that path is both allowlisted and mounted at the same absolute location inside the bridge container.
   - Given Ansible changes `bridge.service`, `bridge.yaml`, or the bridge `.env`, the playbook reloads systemd and restarts `bridge.service` before waiting on port `9445`.
+  - Given `bridge.service` starts from `/opt/ai-agent-bridge/.env`, the `docker run` command passes the resolved `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GEMINI_API_KEY` values into the container instead of the literal strings `$ANTHROPIC_API_KEY`, `$OPENAI_API_KEY`, and `$GEMINI_API_KEY`.
+  - Given bridge installation is enabled, the final smoke verification inspects the running `ai-agent-bridge` container environment and fails if any provider API key is still the literal placeholder string `$ANTHROPIC_API_KEY`, `$OPENAI_API_KEY`, or `$GEMINI_API_KEY`.
   - At the end of the smoke play, Ansible fails if `docker`, `aadm.service`, or `nginx` are not active, and also fails if `bridge.service` is not active when bridge installation is enabled.
   - Given a browser console call after desktop config load, the web app emits a Pino browser log event to `/_aadm/logs`.
   - Given an uncaught browser error or unhandled promise rejection after desktop config load, the web app emits an error-level Pino browser log event to `/_aadm/logs`.

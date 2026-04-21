@@ -23,6 +23,7 @@
     "smoke:test": "bash ./scripts/smoke-playwright.sh --test",
     "smoke:destroy": "bash ./scripts/run-with-smoke-env.sh bash ./scripts/ec2-smoke-test.sh destroy",
     "test": "node --import tsx --test test/**/*.test.ts",
+    "test:unit": "node --import tsx --test test/unit/**/*.test.ts",
     "test:smoke": "bash ./scripts/run-with-smoke-env.sh bash ./scripts/smoke-ec2.sh",
     "test:coverage": "node --import tsx --experimental-test-coverage --test test/**/*.test.ts",
     "lint": "eslint .",

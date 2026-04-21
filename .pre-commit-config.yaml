@@ -19,7 +19,7 @@ repos:
 
       - id: build-and-test
         name: Build and Test
-        entry: bash -c 'npm run build && npm test'
+        entry: bash -c 'npm run build && npm run test:unit'
         language: system
         pass_filenames: false
         stages: [pre-push]

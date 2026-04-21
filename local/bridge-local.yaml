@@ -39,9 +39,11 @@ providers:
     required_env: ['ANTHROPIC_API_KEY']
     prompt_pattern: "(?m)(❯|>\\s*$)"
 
-# Must match the path where aadm-data is mounted in this container (/app/data)
+# Allow both the local container mount and the production host-visible workspace
+# root used by the manager when it starts bridge sessions.
 allowed_paths:
   - '/app/data/workspaces'
+  - '/opt/ai-agent-desktop-manager/data/workspaces'
   - '/tmp'
 
 logging:

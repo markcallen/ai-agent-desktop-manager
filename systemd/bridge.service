@@ -17,6 +17,7 @@ ExecStart=/usr/bin/docker run \
   -v /opt/ai-agent-bridge/certs:/app/certs \
   -v /opt/ai-agent-bridge/config/bridge.yaml:/app/config/bridge.yaml:ro \
   -v /opt/ai-agent-desktop-manager/data:/app/data \
+  -v /opt/ai-agent-desktop-manager/data/workspaces:/opt/ai-agent-desktop-manager/data/workspaces \
   -e BRIDGE_CONFIG=/app/config/bridge.yaml \
   -e BRIDGE_CN=bridge \
   -e BRIDGE_SANS=bridge,localhost,127.0.0.1 \

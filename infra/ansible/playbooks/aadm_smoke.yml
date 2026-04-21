@@ -396,6 +396,13 @@
         state: present
       when: aadm_install_bridge | bool
 
+    - name: Ensure Docker service is enabled and started
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+      when: aadm_install_bridge | bool
+
     - name: Ensure aadm user is in docker group
       ansible.builtin.user:
         name: '{{ aadm_service_user }}'
@@ -434,8 +441,8 @@
             listen: 0.0.0.0:9445
           tls:
             ca_bundle: /app/certs/ca-bundle.crt
-            cert:     /app/certs/server.crt
-            key:      /app/certs/server.key
+            cert:     /app/certs/bridge.crt
+            key:      /app/certs/bridge.key
           feature_flags:
             provider_fallbacks: false
           sessions:
@@ -443,18 +450,21 @@
             max_global: 20
             idle_timeout: 30m
           providers:
-            - name: claude
+            claude:
               binary: node
-              args: ["@anthropic-ai/claude-code", "--verbose"]
+              args: ["./node_modules/@anthropic-ai/claude-code/cli.js", "--verbose"]
               startup_timeout: 60s
+              validate_startup: false
               prompt_pattern: "(?m)(❯|>\\s*$)"
               required_env: [ANTHROPIC_API_KEY]
           allowed_paths:
             - /app/data/workspaces
+            - /opt/ai-agent-desktop-manager/data/workspaces
             - /tmp
           logging:
             format: json
             level: info
+      notify: Restart bridge service
       when: aadm_install_bridge | bool
 
     - name: Fetch bridge API keys from Secrets Manager
@@ -491,6 +501,7 @@
           ANTHROPIC_API_KEY={{ aadm_anthropic_api_key }}
           OPENAI_API_KEY={{ aadm_openai_api_key }}
           GEMINI_API_KEY={{ aadm_gemini_api_key }}
+      notify: Restart bridge service
       when: aadm_install_bridge | bool
 
     - name: Install bridge systemd service
@@ -501,11 +512,7 @@
         owner: root
         group: root
         mode: '0644'
-      when: aadm_install_bridge | bool
-
-    - name: Reload systemd for bridge unit
-      ansible.builtin.systemd:
-        daemon_reload: true
+      notify: Reload and restart bridge service
       when: aadm_install_bridge | bool
 
     - name: Ensure AADM state and workspace directories are pre-created with correct ownership
@@ -525,6 +532,7 @@
         name: '{{ aadm_bridge_image }}'
         source: pull
       become_user: '{{ aadm_service_user }}'
+      notify: Restart bridge service
       when: aadm_install_bridge | bool
 
     - name: Enable and start bridge service
@@ -532,6 +540,10 @@
         name: bridge.service
         enabled: true
         state: started
+      when: aadm_install_bridge | bool
+
+    - name: Apply pending bridge service changes before readiness checks
+      ansible.builtin.meta: flush_handlers
       when: aadm_install_bridge | bool
 
     - name: Wait for bridge gRPC port to open
@@ -756,6 +768,46 @@
       register: aadm_novnc
       when: aadm_smoke_create_desktop | bool
 
+    - name: Verify required services are active after smoke provisioning
+      ansible.builtin.command:
+        cmd: systemctl is-active {{ item }}
+      register: aadm_required_services
+      changed_when: false
+      loop:
+        - docker
+        - aadm.service
+        - nginx
+
+    - name: Assert required services are active after smoke provisioning
+      ansible.builtin.assert:
+        that:
+          - item.rc == 0
+          - (item.stdout | trim) == 'active'
+        fail_msg: >-
+          Required service {{ item.item }} is not active after smoke provisioning.
+          systemctl is-active returned rc={{ item.rc }} stdout="{{ item.stdout | trim }}"
+      loop: '{{ aadm_required_services.results }}'
+      loop_control:
+        label: '{{ item.item }}'
+
+    - name: Verify bridge service is active after smoke provisioning
+      ansible.builtin.command:
+        cmd: systemctl is-active bridge.service
+      register: aadm_bridge_service_status
+      changed_when: false
+      when: aadm_install_bridge | bool
+
+    - name: Assert bridge service is active after smoke provisioning
+      ansible.builtin.assert:
+        that:
+          - aadm_bridge_service_status.rc == 0
+          - (aadm_bridge_service_status.stdout | trim) == 'active'
+        fail_msg: >-
+          bridge.service is not active after smoke provisioning.
+          systemctl is-active returned rc={{ aadm_bridge_service_status.rc }}
+          stdout="{{ aadm_bridge_service_status.stdout | trim }}"
+      when: aadm_install_bridge | bool
+
     - name: Destroy smoke desktop when requested
       ansible.builtin.uri:
         url: 'http://127.0.0.1:8899/v1/desktops/{{ aadm_create.json.id }}'
@@ -809,6 +861,18 @@
       ansible.builtin.systemd:
         name: nginx
         state: reloaded
+    - name: Reload and restart bridge service
+      ansible.builtin.systemd:
+        daemon_reload: true
+      listen: Reload and restart bridge service
+    - name: Restart bridge service
+      ansible.builtin.systemd:
+        name: bridge.service
+        enabled: true
+        state: restarted
+      listen:
+        - Reload and restart bridge service
+        - Restart bridge service
     - name: Restart aadm
       ansible.builtin.systemd:
         name: aadm.service

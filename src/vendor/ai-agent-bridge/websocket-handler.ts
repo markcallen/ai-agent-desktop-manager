@@ -1,10 +1,12 @@
 /*
  * Vendored from ai-agent-bridge v0.2.0 bridge-client-node.
+ * Adapted for local proto resolution, repo build layout, and friendly gRPC error messages.
  */
 
 import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
+import * as grpc from '@grpc/grpc-js';
 import { BridgeGrpcClient } from './grpc-client.js';
 import type {
   BridgeClientOptions,
@@ -13,6 +15,36 @@ import type {
   Logger,
   ServerMessage
 } from './types.js';
+
+const GRPC_STATUS_MESSAGES: Partial<Record<grpc.status, string>> = {
+  [grpc.status.UNAVAILABLE]:
+    'Bridge service is not reachable. Check that ai-agent-bridge is running.',
+  [grpc.status.UNAUTHENTICATED]:
+    'Bridge authentication failed. Check bridge credentials.',
+  [grpc.status.PERMISSION_DENIED]:
+    'Bridge access denied. Check bridge credentials.',
+  [grpc.status.NOT_FOUND]: 'Requested resource not found on bridge.',
+  [grpc.status.DEADLINE_EXCEEDED]:
+    'Bridge request timed out. The service may be overloaded.',
+  [grpc.status.RESOURCE_EXHAUSTED]:
+    'Bridge resource limit reached. Try again later.',
+  [grpc.status.INTERNAL]: 'Bridge internal error.',
+  [grpc.status.UNKNOWN]: 'Bridge returned an unknown error.'
+};
+
+function friendlyGrpcMessage(err: unknown): string {
+  if (
+    err &&
+    typeof err === 'object' &&
+    'code' in err &&
+    typeof (err as { code: unknown }).code === 'number'
+  ) {
+    const code = (err as { code: number }).code as grpc.status;
+    const friendly = GRPC_STATUS_MESSAGES[code];
+    if (friendly) return friendly;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
 
 export interface BridgeWebSocketHandlerOptions {
   bridgeAddr: string;
@@ -156,8 +188,7 @@ export function createBridgeWebSocketHandler(
                 }
               } catch (err) {
                 if (!ac.signal.aborted) {
-                  const message =
-                    err instanceof Error ? err.message : String(err);
+                  const message = friendlyGrpcMessage(err);
                   logger.warn('Attach stream error', { sessionId, message });
                   sendError('stream_error', message);
                 }
@@ -214,7 +245,7 @@ export function createBridgeWebSocketHandler(
           }
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = friendlyGrpcMessage(err);
         logger.error('Error handling message', {
           connId,
           type: (msg as { type?: string }).type,

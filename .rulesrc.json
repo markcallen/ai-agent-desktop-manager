@@ -10,9 +10,15 @@
     "logging",
     "testing"
   ],
-  "ballastVersion": "5.4.2",
-  "languages": ["typescript"],
+  "ballastVersion": "5.7.3",
+  "languages": ["typescript", "ansible", "terraform"],
   "paths": {
-    "typescript": ["."]
+    "ansible": ["infra/ansible", "infra/ansible/roles/novnc/novnc"],
+    "terraform": [
+      "infra/ansible/roles/novnc/novnc",
+      "infra/ansible/roles/novnc/novnc/smoke/ec2",
+      "infra/smoke-test"
+    ],
+    "typescript": [".", "web"]
   }
 }

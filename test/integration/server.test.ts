@@ -94,6 +94,18 @@ async function importServerWithEnv() {
   configMod.config.tmuxConfPath = path.join(stateDir, 'tmux.conf');
   configMod.config.nginxSnippetDir = nginxDir;
   configMod.config.publicBaseUrl = 'https://host.example.com';
+  configMod.config.bridgeConfigPath = path.join(tmpRoot, 'bridge.yaml');
+  await fs.writeFile(
+    configMod.config.bridgeConfigPath,
+    `providers:
+  claude:
+    binary: node
+  codex:
+    binary: node
+  gemini:
+    binary: node
+`
+  );
   netMod.setPortChecker(async () => true);
   const storeMod = await import('../../src/util/store.ts');
   installDefaultSaveStateHook(storeMod);
@@ -431,7 +443,12 @@ test(
         sessionName: string;
         workspaceDir: string;
       };
-      bridge: { enabled: boolean; websocketUrl: string };
+      bridge: {
+        enabled: boolean;
+        websocketUrl: string;
+        defaultProvider: string;
+        availableProviders: string[];
+      };
     };
     assert.equal(json.desktop.id, created.id);
     assert.equal(json.desktop.display, created.display);
@@ -446,6 +463,12 @@ test(
       json.bridge.websocketUrl,
       `/_aadm/bridge/desk-${created.display}/ws`
     );
+    assert.equal(json.bridge.defaultProvider, 'claude');
+    assert.deepEqual(json.bridge.availableProviders, [
+      'claude',
+      'codex',
+      'gemini'
+    ]);
   }
 );
 
@@ -477,8 +500,20 @@ test(
         url: `/_aadm/desktop/${created.id}/config`
       });
       assert.equal(cfg.statusCode, 200);
-      const json = cfg.json() as { bridge: { enabled: boolean } };
+      const json = cfg.json() as {
+        bridge: {
+          enabled: boolean;
+          defaultProvider: string;
+          availableProviders: string[];
+        };
+      };
       assert.equal(json.bridge.enabled, true);
+      assert.equal(json.bridge.defaultProvider, 'claude');
+      assert.deepEqual(json.bridge.availableProviders, [
+        'claude',
+        'codex',
+        'gemini'
+      ]);
     } finally {
       configMod.config.bridgeAddr = previousBridgeAddr;
     }

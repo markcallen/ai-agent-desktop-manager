@@ -71,6 +71,7 @@ import {
   buildBridgeHandler,
   managerBridgeWebsocketPath
 } from './util/bridge.js';
+import { readBridgeProviderConfig } from './util/bridge-config.js';
 
 function desktopId(display: number) {
   return `desk-${display}`;
@@ -479,6 +480,7 @@ const browserLogsToken = crypto.randomBytes(32).toString('hex');
 function buildDesktopConfig(d: DesktopRecord) {
   const bridgeEnabled = !!config.bridgeAddr;
   const bridgeWebsocketUrl = managerBridgeWebsocketPath(d.id);
+  const bridgeProviderConfig = readBridgeProviderConfig();
 
   return {
     desktop: {
@@ -498,7 +500,8 @@ function buildDesktopConfig(d: DesktopRecord) {
       websocketUrl: bridgeWebsocketUrl,
       websocketPath: bridgeWebsocketUrl,
       workspaceDir: d.workspaceDir,
-      defaultProvider: 'claude',
+      defaultProvider: bridgeProviderConfig.defaultProvider,
+      availableProviders: bridgeProviderConfig.providers,
       projectId: d.id
     },
     browserLogsToken

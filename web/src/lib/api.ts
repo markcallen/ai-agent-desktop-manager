@@ -17,6 +17,7 @@ export interface DesktopConfig {
     websocketPath: string;
     workspaceDir: string;
     defaultProvider: string;
+    availableProviders: string[];
     projectId: string;
   };
   browserLogsToken: string;

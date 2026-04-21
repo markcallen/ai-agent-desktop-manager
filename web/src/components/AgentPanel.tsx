@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   resolveDesktopWebSocketUrl,
   type DesktopConfig
@@ -20,7 +20,9 @@ export function AgentPanel({ config }: Props) {
     config.desktop.novncUrl
   );
   const termRef = useRef<TerminalHandle>(null);
-  const [provider, setProvider] = useState(bridge.defaultProvider);
+  const [provider, setProvider] = useState(
+    bridge.availableProviders[0] ?? bridge.defaultProvider
+  );
   const [repoPath, setRepoPath] = useState(bridge.workspaceDir);
 
   const handleOutput = useCallback((data: Uint8Array) => {
@@ -31,9 +33,17 @@ export function AgentPanel({ config }: Props) {
     websocketUrl: bridgeWebsocketUrl,
     enabled: bridge.enabled,
     defaultProvider: bridge.defaultProvider,
+    initialProviders: bridge.availableProviders,
     projectId: bridge.projectId,
     onOutput: handleOutput
   });
+
+  useEffect(() => {
+    const availableProviders = bridgeSocket.providers.map((entry) => entry.provider);
+    if (availableProviders.length === 0) return;
+    if (availableProviders.includes(provider)) return;
+    setProvider(availableProviders[0]);
+  }, [bridgeSocket.providers, provider]);
 
   function handleStart() {
     if (!repoPath) return;

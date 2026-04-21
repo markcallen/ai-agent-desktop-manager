@@ -99,6 +99,7 @@ Base: `http://127.0.0.1:8899`
 - Browser logging must capture `console.log`, `console.info`, `console.debug`, `console.warn`, `console.error`, uncaught errors, and unhandled promise rejections.
 - Browser logging must POST batched Pino log events to `/_aadm/logs` with the per-desktop browser logs token.
 - The manager must ingest those browser log events and emit them through the server Pino logger without exposing sensitive auth headers or cookies.
+- The AI Agent tab must initialize its provider selector from the configured `ai-agent-bridge` provider list in bridge YAML instead of a hardcoded single-provider fallback.
 - Acceptance criteria:
   - Given a public desktop URL on a non-loopback host and a relative websocket path, the browser connects to that public host.
   - Given a public desktop URL on a non-loopback host and a stored absolute websocket URL that points at loopback, the browser rewrites it to the public host before connecting.
@@ -112,6 +113,7 @@ Base: `http://127.0.0.1:8899`
   - Given a browser console call after desktop config load, the web app emits a Pino browser log event to `/_aadm/logs`.
   - Given an uncaught browser error or unhandled promise rejection after desktop config load, the web app emits an error-level Pino browser log event to `/_aadm/logs`.
   - Given a valid batch of browser Pino log events at `/_aadm/logs`, the manager writes them through its server logger with browser metadata preserved.
+  - Given the bridge YAML defines providers in a specific order, the AI Agent tab shows those configured provider names in that order and defaults to the first configured provider.
 
 ### Orchestration
 

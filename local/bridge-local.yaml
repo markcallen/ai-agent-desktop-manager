@@ -9,7 +9,7 @@ tls:
 # No auth section — mTLS provides client authentication
 
 feature_flags:
-  provider_fallbacks: false
+  provider_fallbacks: true
 
 sessions:
   max_per_project: 5
@@ -37,7 +37,24 @@ providers:
     validate_startup: false
     startup_probe: 'prompt'
     required_env: ['ANTHROPIC_API_KEY']
+    fallbacks: ['codex']
     prompt_pattern: "(?m)(❯|>\\s*$)"
+  codex:
+    binary: 'node'
+    args: ['./node_modules/@openai/codex/bin/codex.js']
+    startup_timeout: '60s'
+    validate_startup: false
+    startup_probe: 'output'
+    required_env: ['OPENAI_API_KEY']
+    prompt_pattern: "(?m)(>\\s*$|›)"
+  gemini:
+    binary: 'node'
+    args: ['./node_modules/@google/gemini-cli/dist/index.js']
+    startup_timeout: '60s'
+    validate_startup: false
+    startup_probe: 'output'
+    required_env: ['GEMINI_API_KEY']
+    prompt_pattern: "^\\s*>\\s*$"
 
 # Allow both the local container mount and the production host-visible workspace
 # root used by the manager when it starts bridge sessions.
@@ -49,3 +66,5 @@ allowed_paths:
 logging:
   level: 'info'
   format: 'json'
+  redact_patterns:
+    - "(?i)(api[_-]?key|token|secret|password)\\s*[:=]\\s*\\S+"

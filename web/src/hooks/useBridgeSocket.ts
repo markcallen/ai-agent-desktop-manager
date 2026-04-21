@@ -16,6 +16,7 @@ interface Options {
   websocketUrl: string;
   enabled: boolean;
   defaultProvider: string;
+  initialProviders: string[];
   projectId: string;
   onOutput: (data: Uint8Array) => void;
 }
@@ -41,6 +42,7 @@ export function useBridgeSocket({
   websocketUrl,
   enabled,
   defaultProvider,
+  initialProviders,
   projectId,
   onOutput
 }: Options): Result {
@@ -48,7 +50,14 @@ export function useBridgeSocket({
     useState<ConnectionStatus>('connecting');
   const [session, setSession] = useState<BridgeSession | null>(null);
   const [health, setHealth] = useState<HealthResponseMsg | null>(null);
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [providers, setProviders] = useState<ProviderInfo[]>(
+    initialProviders.map((provider) => ({
+      provider,
+      available: false,
+      binary: '',
+      version: ''
+    }))
+  );
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -128,14 +137,12 @@ export function useBridgeSocket({
             setProviders(
               list.length
                 ? list
-                : [
-                    {
-                      provider: defaultProvider,
-                      available: false,
-                      binary: '',
-                      version: ''
-                    }
-                  ]
+                : initialProviders.map((provider) => ({
+                    provider,
+                    available: false,
+                    binary: '',
+                    version: ''
+                  }))
             );
             return;
           }
@@ -246,7 +253,7 @@ export function useBridgeSocket({
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [websocketUrl, enabled, defaultProvider, attach, send]);
+  }, [websocketUrl, enabled, defaultProvider, initialProviders, attach, send]);
 
   const startSession = useCallback(
     (provider: string, repoPath: string, cols: number, rows: number) => {

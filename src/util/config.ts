@@ -37,6 +37,7 @@ export const Config = z.object({
   bridgeCaCertPath: z.string().optional(),
   bridgeClientCertPath: z.string().optional(),
   bridgeClientKeyPath: z.string().optional(),
+  bridgeConfigPath: z.string().optional(),
 
   nginxSnippetDir: z.string().default('/etc/nginx/conf.d/agent-desktops'),
   nginxBin: z.string().default('/usr/sbin/nginx'),
@@ -97,6 +98,7 @@ export const config = Config.parse({
   bridgeCaCertPath: process.env.AADM_BRIDGE_CA_CERT_PATH || undefined,
   bridgeClientCertPath: process.env.AADM_BRIDGE_CLIENT_CERT_PATH || undefined,
   bridgeClientKeyPath: process.env.AADM_BRIDGE_CLIENT_KEY_PATH || undefined,
+  bridgeConfigPath: process.env.AADM_BRIDGE_CONFIG_PATH || undefined,
 
   nginxSnippetDir:
     process.env.AADM_NGINX_SNIPPET_DIR ?? '/etc/nginx/conf.d/agent-desktops',

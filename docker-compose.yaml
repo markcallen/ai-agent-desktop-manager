@@ -9,6 +9,7 @@ services:
       AADM_HOST: '0.0.0.0'
       AADM_PORT: '8899'
       AADM_PUBLIC_BASE_URL: 'http://localhost:8899'
+      AADM_DESKTOP_ROUTE_TOKEN_SECRET: 'local-dev-route-token-secret'
       # Stub out nginx and systemctl — not needed for terminal/AI agent debugging
       AADM_NGINX_BIN: '/app/local/stubs/nginx'
       AADM_SYSTEMCTL_BIN: '/app/local/stubs/systemctl'

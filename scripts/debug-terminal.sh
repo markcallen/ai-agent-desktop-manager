@@ -8,7 +8,7 @@
 # The script:
 #   1. Opens an SSH forward tunnel  local:18899 → EC2:8899  (aadm manager)
 #   2. Mints a fresh access URL for desk-2 from the manager API
-#   3. Runs test/playwright/terminal-debug.mts (Playwright + diagnostics)
+#   3. Runs test/playwright/terminal-debug.manual.ts (Playwright + diagnostics)
 #   4. Tears down the tunnel on exit (unless --keep-alive)
 set -euo pipefail
 
@@ -116,4 +116,4 @@ SMOKE_PUBLIC_BASE_URL="$PUBLIC_BASE_URL" \
 SMOKE_ACCESS_URL="$ACCESS_URL" \
   node --import tsx --test \
     --test-name-pattern 'terminal debug' \
-    test/playwright/terminal-debug.test.ts
+    test/playwright/terminal-debug.manual.ts

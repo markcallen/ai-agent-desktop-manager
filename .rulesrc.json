@@ -8,8 +8,10 @@
     "publishing",
     "linting",
     "logging",
-    "testing"
+    "testing",
+    "git-hooks"
   ],
+  "skills": ["github-health-check"],
   "ballastVersion": "5.7.3",
   "languages": ["typescript", "ansible", "terraform"],
   "paths": {

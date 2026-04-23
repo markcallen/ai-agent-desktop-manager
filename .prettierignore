@@ -3,3 +3,4 @@ dist
 *.lock
 pnpm-lock.yaml
 web/
+.codex/rules/

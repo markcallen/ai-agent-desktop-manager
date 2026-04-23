@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { createTerminalHandle } from './terminal-handle';
 
 export interface TerminalHandle {
   write(data: string | Uint8Array): void;
@@ -95,26 +96,7 @@ export const Terminal = forwardRef<TerminalHandle, Props>(
       };
     }, []);
 
-    useImperativeHandle(ref, () => ({
-      write(data: string | Uint8Array) {
-        xtermRef.current?.write(data);
-      },
-      clear() {
-        xtermRef.current?.clear();
-      },
-      focus() {
-        xtermRef.current?.focus();
-      },
-      fit() {
-        fitRef.current?.fit();
-      },
-      get cols() {
-        return xtermRef.current?.cols ?? 120;
-      },
-      get rows() {
-        return xtermRef.current?.rows ?? 40;
-      }
-    }));
+    useImperativeHandle(ref, () => createTerminalHandle(xtermRef, fitRef));
 
     return (
       <div

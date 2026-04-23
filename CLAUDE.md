@@ -18,6 +18,7 @@ Read and follow these rule files in `.claude/rules/` when they apply:
 - `.claude/rules/common/publishing-libraries.md` — Rules for common/publishing-libraries
 - `.claude/rules/common/publishing-sdks.md` — Rules for common/publishing-sdks
 - `.claude/rules/common/publishing-apps.md` — Rules for common/publishing-apps
+- `.claude/rules/common/git-hooks.md` — Rules for common/git-hooks
 - `.claude/rules/typescript/typescript-linting.md` — Rules for typescript/linting
 - `.claude/rules/typescript/typescript-logging.md` — Rules for typescript/logging
 - `.claude/rules/typescript/typescript-testing.md` — Rules for typescript/testing
@@ -27,3 +28,11 @@ Read and follow these rule files in `.claude/rules/` when they apply:
 - `.claude/rules/terraform/terraform-linting.md` — Rules for terraform/linting
 - `.claude/rules/terraform/terraform-logging.md` — Rules for terraform/logging
 - `.claude/rules/terraform/terraform-testing.md` — Rules for terraform/testing
+
+## Installed skills
+
+Created by Ballast. Do not edit this section.
+
+Read and use these skill files in `.claude/skills/` when they are relevant:
+
+- `.claude/skills/github-health-check.skill` — run a comprehensive GitHub repository health check covering CI status, branch hygiene, and repo configuration

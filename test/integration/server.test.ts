@@ -529,7 +529,14 @@ test(
     const configMod = await import('../../src/util/config.ts');
     const storeMod = await import('../../src/util/store.ts');
     const statePath = path.join(stateDirFromTmpRoot(), 'state.json');
-    const previousState = await fs.readFile(statePath, 'utf-8');
+    const previousState = await fs
+      .readFile(statePath, 'utf-8')
+      .catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return JSON.stringify({ desktops: [] }, null, 2);
+        }
+        throw error;
+      });
     const previousConfig = {
       host: configMod.config.host,
       port: configMod.config.port,

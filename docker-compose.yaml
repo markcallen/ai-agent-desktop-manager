@@ -108,6 +108,8 @@ services:
       BRIDGE_SANS: bridge,localhost,127.0.0.1
       BRIDGE_CLIENT_CN: client
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     volumes:
       - ./certs:/app/certs
       - ./local/bridge-local.yaml:/app/config/bridge-local.yaml:ro

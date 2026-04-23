@@ -90,6 +90,7 @@ Base: `http://127.0.0.1:8899`
 
 - The browser desktop shell must resolve terminal and bridge websocket endpoints against the desktop's public base URL.
 - The shell must not prefer `localhost`, `127.0.0.1`, or `::1` for browser websocket connections when the desktop is being accessed through a non-loopback public URL.
+- When the desktop web app is served through the local manager dev server on port `8899`, the manager must proxy Vite HMR websocket upgrades for both `/_aadm_hmr` and `/_aadm/desktop-app/_aadm_hmr` and preserve the original query string.
 - The managed terminal session and terminal attach process must provide a clear-capable terminal type so shell startup scripts that invoke `clear` do not fail the Terminal tab.
 - When `ai-agent-bridge` is enabled, its runtime configuration must allow the manager-owned workspace root `/opt/ai-agent-desktop-manager/data/workspaces` and mount that same absolute path inside the bridge container so session `repo_path` validation and process working directories agree.
 - The Ansible deployment flow for `ai-agent-bridge` must ensure the Docker daemon is enabled before the bridge unit starts, and must restart the bridge unit whenever the shipped unit file, bridge config, or bridge environment file changes.
@@ -100,10 +101,13 @@ Base: `http://127.0.0.1:8899`
 - Browser logging must POST batched Pino log events to `/_aadm/logs` with the per-desktop browser logs token.
 - The manager must ingest those browser log events and emit them through the server Pino logger without exposing sensitive auth headers or cookies.
 - The AI Agent tab must initialize its provider selector from the configured `ai-agent-bridge` provider list in bridge YAML instead of a hardcoded single-provider fallback.
+- Pressing Stop in the AI Agent tab must immediately clear the embedded `xterm.js` terminal output so stale session text is not left visible after the session ends.
+- The AI Agent tab must preserve terminal scrollback so a user can scroll up to review previous agent messages from the current tab session.
 - Acceptance criteria:
   - Given a public desktop URL on a non-loopback host and a relative websocket path, the browser connects to that public host.
   - Given a public desktop URL on a non-loopback host and a stored absolute websocket URL that points at loopback, the browser rewrites it to the public host before connecting.
   - The terminal websocket URL shown in the UI matches the resolved browser connection URL.
+  - Given local desktop-app dev assets are served through the manager on port `8899` and Vite opens HMR at `/_aadm/desktop-app/_aadm_hmr?token=...`, the manager accepts that websocket upgrade and proxies it to the Vite dev server as `/_aadm_hmr?token=...`.
   - Given a shell profile or terminal helper that invokes `clear`, opening the Terminal tab still attaches successfully because the tmux session and attach wrapper both expose a non-dumb `TERM`.
   - Given the bridge receives `repo_path` `/opt/ai-agent-desktop-manager/data/workspaces/<desktop-id>`, session startup succeeds because that path is both allowlisted and mounted at the same absolute location inside the bridge container.
   - Given Ansible changes `bridge.service`, `bridge.yaml`, or the bridge `.env`, the playbook reloads systemd and restarts `bridge.service` before waiting on port `9445`.
@@ -114,6 +118,8 @@ Base: `http://127.0.0.1:8899`
   - Given an uncaught browser error or unhandled promise rejection after desktop config load, the web app emits an error-level Pino browser log event to `/_aadm/logs`.
   - Given a valid batch of browser Pino log events at `/_aadm/logs`, the manager writes them through its server logger with browser metadata preserved.
   - Given the bridge YAML defines providers in a specific order, the AI Agent tab shows those configured provider names in that order and defaults to the first configured provider.
+  - Given the AI Agent terminal shows prior session output, pressing Stop clears the visible `xterm.js` buffer before any later session starts.
+  - Given the AI Agent terminal has emitted multiple messages during the current tab session, the user can scroll back in the `xterm.js` viewport to inspect earlier output.
 
 ### Orchestration
 

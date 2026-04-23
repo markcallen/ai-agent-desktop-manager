@@ -536,9 +536,16 @@ export function buildApp(options: BuildAppOptions = {}) {
     const bridgeMatch = /^\/_aadm\/bridge\/([^/]+)\/ws$/.exec(
       requestUrl.pathname
     );
-    const isViteHmr = viteDevUrl && requestUrl.pathname === '/_aadm_hmr';
+    const isViteHmr =
+      Boolean(viteDevUrl) &&
+      (requestUrl.pathname === '/_aadm_hmr' ||
+        requestUrl.pathname === '/_aadm/desktop-app/_aadm_hmr');
 
     if (!match && !bridgeMatch && !isViteHmr) {
+      app.log.warn(
+        { path: requestUrl.pathname },
+        'rejecting websocket upgrade for unknown path'
+      );
       socket.destroy();
       return;
     }
@@ -547,19 +554,38 @@ export function buildApp(options: BuildAppOptions = {}) {
       const target = new URL(viteDevUrl);
       const port = parseInt(target.port || '80', 10);
       const proxySocket = net.connect(port, target.hostname);
+      const hmrPath = `/_aadm_hmr${requestUrl.search}`;
       const headers = Object.entries(req.headers)
         .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
         .join('\r\n');
-      proxySocket.write(`GET /_aadm_hmr HTTP/1.1\r\n${headers}\r\n\r\n`);
+      proxySocket.write(`GET ${hmrPath} HTTP/1.1\r\n${headers}\r\n\r\n`);
       proxySocket.pipe(socket);
       socket.pipe(proxySocket);
-      proxySocket.on('error', () => socket.destroy());
+      proxySocket.on('error', (error) => {
+        app.log.error(
+          {
+            err: error,
+            path: requestUrl.pathname,
+            targetHost: target.hostname,
+            targetPort: port
+          },
+          'vite hmr websocket proxy failed'
+        );
+        socket.destroy();
+      });
       socket.on('close', () => proxySocket.destroy());
       return;
     }
 
     if (bridgeMatch) {
       if (!bridgeHandler) {
+        app.log.warn(
+          {
+            path: requestUrl.pathname,
+            bridgeConfigured: Boolean(config.bridgeAddr)
+          },
+          'rejecting bridge websocket upgrade because bridge handler is unavailable'
+        );
         socket.write('HTTP/1.1 501 Not Implemented\r\n\r\n');
         socket.destroy();
         return;
@@ -570,6 +596,10 @@ export function buildApp(options: BuildAppOptions = {}) {
         const st = await loadState();
         const desktop = st.desktops.find((entry) => entry.id === desktopId);
         if (!desktop) {
+          app.log.warn(
+            { path: requestUrl.pathname, desktopId },
+            'rejecting bridge websocket upgrade for unknown desktop'
+          );
           socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
           socket.destroy();
           return;
@@ -578,7 +608,11 @@ export function buildApp(options: BuildAppOptions = {}) {
         bridgeHandler.handleUpgrade(req, socket, head, (ws: WsWebSocket) => {
           bridgeHandler.emit('connection', ws, req);
         });
-      })().catch(() => {
+      })().catch((error) => {
+        app.log.error(
+          { err: error, path: requestUrl.pathname, desktopId },
+          'bridge websocket upgrade failed'
+        );
         socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
         socket.destroy();
       });
@@ -587,6 +621,10 @@ export function buildApp(options: BuildAppOptions = {}) {
 
     const desktopId = match?.[1];
     if (!desktopId) {
+      app.log.warn(
+        { path: requestUrl.pathname },
+        'rejecting terminal websocket upgrade without desktop id'
+      );
       socket.destroy();
       return;
     }
@@ -594,6 +632,10 @@ export function buildApp(options: BuildAppOptions = {}) {
       const st = await loadState();
       const desktop = st.desktops.find((entry) => entry.id === desktopId);
       if (!desktop) {
+        app.log.warn(
+          { path: requestUrl.pathname, desktopId },
+          'rejecting terminal websocket upgrade for unknown desktop'
+        );
         socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
         socket.destroy();
         return;
@@ -687,7 +729,11 @@ export function buildApp(options: BuildAppOptions = {}) {
         });
         ws.close();
       });
-    })().catch(() => {
+    })().catch((error) => {
+      app.log.error(
+        { err: error, path: requestUrl.pathname, desktopId },
+        'terminal websocket upgrade failed'
+      );
       socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
       socket.destroy();
     });

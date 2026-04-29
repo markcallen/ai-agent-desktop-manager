@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.local
+.env.smoke.local
+.vscode
+*.log
+.git
+data
+certs
+infra/smoke-test/.runtime

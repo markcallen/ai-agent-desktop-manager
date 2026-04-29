@@ -1,7 +1,7 @@
 # EC2 Smoke Test
 
 This repo now includes a local Terraform + Ansible workflow for a disposable AWS smoke test in an AWS region you choose at runtime.
-The smoke host now uses `novnc-openbox` release `v0.1.0` for the base noVNC/Openbox/nginx/TLS stack instead of rebuilding that layer inside this repo.
+The smoke host now installs `markcallen.novnc_desktop` from GitHub at `v0.1.3` for the base noVNC/desktop/nginx/TLS stack instead of rebuilding that layer inside this repo.
 
 ## What it does
 
@@ -31,12 +31,40 @@ The smoke host now uses `novnc-openbox` release `v0.1.0` for the base noVNC/Open
 - `aws` CLI configured for the target account
 - `terraform`
 - `ansible-playbook`
+- `ansible-galaxy`
 - `ssh`, `ssh-keygen`, `tar`, `curl`, `jq`
+
+The smoke helper installs the pinned Ansible roles and collections from
+[`infra/ansible/requirements.yml`](../infra/ansible/requirements.yml) before it
+runs the playbook.
 
 ## Run
 
 ```bash
 ./scripts/ec2-smoke-test.sh run --region us-west-2 --tls-domain smoke.markcallen.dev --tls-email ops@example.com
+```
+
+If you want the project smoke test to provision and destroy EC2 automatically instead of expecting an existing smoke host, put your smoke settings in `.env.smoke.local` and run:
+
+```bash
+cp .env.smoke.example .env.smoke.local
+npm run test:smoke
+```
+
+The smoke npm scripts load `.env.smoke.local` automatically. If that file is absent, they fall back to `.env.smoke`.
+
+Example `.env.smoke.local`:
+
+```bash
+SMOKE_AWS_REGION=us-west-2
+SMOKE_TLS_DOMAIN=smoke.markcallen.dev
+SMOKE_TLS_EMAIL=ops@example.com
+```
+
+If you want the smoke host left running for debugging, use:
+
+```bash
+npm run test:smoke:debug
 ```
 
 Optional flags:
@@ -87,6 +115,7 @@ Inspect it:
 ```bash
 aadm list
 aadm doctor --id desk-1
+aadm terminal-access --id desk-1
 ```
 
 Destroy it:
@@ -114,6 +143,8 @@ Send JavaScript and keep following console output:
 aab-console eval 'console.log(window.location.href)' --follow
 ```
 
+The terminal workspace is tmux-backed. After desktop creation, the manager creates a workspace directory under `/opt/ai-agent-desktop-manager/data/workspaces/<desktop-id>` and a tmux session named `aadm-<desktop-id>`. The browser access URL now lands on the manager-owned desktop shell at `/desktop/<display>/`, and that shell connects its terminal pane through the public websocket path `/desktop/<display>/terminal/ws` while presenting the URL as a copyable field.
+
 Capture a screenshot through `ai-agent-browser`:
 
 ```bash
@@ -138,7 +169,13 @@ Use the Playwright-style browser smoke wrapper after provisioning:
 ./scripts/smoke-playwright.sh
 ```
 
-Use `./scripts/smoke-playwright.sh --test` (or `npm run smoke:playwright-test`) to execute the same browser smoke assertion without saving a screenshot; this is the regression you want in CI.
+Use `npm run test:smoke` (or `npm run smoke:playwright-test`) to provision EC2, run the remote Playwright assertion, and destroy the stack automatically on pass or fail.
+
+Use `npm run test:smoke:debug` (or `npm run smoke:playwright-test:debug`) to provision EC2, run the remote Playwright assertion, and leave the instance running so you can debug it manually. Destroy it later with `./scripts/ec2-smoke-test.sh destroy --region <region>`.
+
+Use `npm run smoke:playwright-test:status` to reprint the saved SSH, health check, noVNC, and destroy commands for the currently provisioned smoke stack.
+
+Use `./scripts/smoke-playwright.sh --test` (or `npm run smoke:playwright-test:existing`) to execute the same browser smoke assertion against an already-provisioned smoke host without saving a screenshot.
 
 The wrapper reads the local summary file, uses a tokenized manager access URL when one is present, and stores a screenshot at `infra/smoke-test/.runtime/browser-smoke.png`.
 
@@ -155,6 +192,6 @@ Destroy the stack later with:
 - The current Ansible flow still packages the sibling `../ai-agent-browser` checkout onto the host. `--aab-npm-package` controls the package name used inside that deployment flow.
 - The wrapper leaves the instance running by default for manual inspection.
 - `80/tcp` and `443/tcp` now default to your current public IP. Use `--public-web-ingress` only when broader exposure is intentional.
-- The host always delegates nginx, VNC password handling, and certbot issuance to `novnc-openbox` `v0.1.0`.
+- The host always delegates nginx, VNC password handling, and certbot issuance to `markcallen.novnc_desktop` `v0.1.3`.
 - The delegated Route 53 zone named by `--tls-domain` must already exist and be publicly delegated. Per-run hostname creation now happens inside the Terraform smoke stack, so the separate A-record helper step is no longer needed for each run.
 - The manager smoke desktop now starts at display `:2` so the role-managed desktop on `:1` can coexist without port or display collisions.

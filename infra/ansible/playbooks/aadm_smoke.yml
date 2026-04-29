@@ -25,8 +25,37 @@
     aadm_desktop_route_token_secret: '{{ lookup("ansible.builtin.password", "/dev/null length=64 chars=ascii_letters,digits") }}'
     aadm_tls_cert_path: '/etc/letsencrypt/live/{{ aadm_tls_domain }}/fullchain.pem'
     aadm_tls_key_path: '/etc/letsencrypt/live/{{ aadm_tls_domain }}/privkey.pem'
+    aadm_novnc_web_root_candidates:
+      - /usr/share/novnc
+      - /usr/share/novnc/utils/web
+      - /usr/local/share/novnc
+      - /opt/novnc
+      - /opt/noVNC
+    aadm_manager_display_min: 2
     aadm_smoke_create_desktop: true
     aadm_smoke_destroy_desktop: false
+    # ai-agent-bridge address for AADM_BRIDGE_ADDR.
+    # Empty = bridge disabled (AADM runs without agent sessions).
+    # Set to the gRPC address of a running ai-agent-bridge instance, e.g. 127.0.0.1:9445,
+    # when the bridge is deployed alongside AADM on this host.
+    aadm_bridge_addr: ''
+    # API keys forwarded to the bridge process environment (only used when bridge is deployed).
+    # Ignored when aadm_secrets_manager_arn is set — keys are fetched from Secrets Manager instead.
+    aadm_anthropic_api_key: ''
+    aadm_openai_api_key: ''
+    aadm_gemini_api_key: ''
+    # Set to true to install and run ai-agent-bridge on this host via Docker.
+    # When true, aadm_bridge_addr is automatically set to 127.0.0.1:9445 and
+    # the bridge cert paths are configured in the AADM environment file.
+    # Automatically set to true when aadm_secrets_manager_arn is provided.
+    aadm_install_bridge: false
+    # ARN of an AWS Secrets Manager secret containing bridge API keys.
+    # When set, aadm_install_bridge is forced to true and the API keys are
+    # fetched from the secret (JSON keys: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY).
+    aadm_secrets_manager_arn: ''
+    aadm_bridge_image: ghcr.io/markcallen/ai-agent-bridge:v0.2.0
+    aadm_bridge_install_dir: /opt/ai-agent-bridge
+    aadm_bridge_cert_dir: /opt/ai-agent-bridge/certs
   tasks:
     - name: Wait for cloud-init to finish if present
       ansible.builtin.command:
@@ -62,19 +91,32 @@
           - python3
           - python3-apt
           - rsync
+          - tmux
           - wmctrl
           - xauth
           - xfonts-base
         update_cache: true
 
-    - name: Install novnc-openbox base stack from v0.1.0
+    - name: Install novnc-desktop v0.1.3 from GitHub
       ansible.builtin.include_role:
-        name: novnc
+        name: markcallen.novnc_desktop
       vars:
         vnc_user: ubuntu
         vnc_display: 1
-        vnc_password: '{{ aadm_vnc_password }}'
+        desktop_type: elementary
         smoke_test_marker_enabled: true
+        novnc_base_url: >-
+          {{
+            aadm_public_base_url
+            if (aadm_public_base_url | length > 0)
+            else (
+              'https://' ~ (
+                aadm_tls_domain
+                if (aadm_enable_https | bool and aadm_tls_domain | length > 0)
+                else inventory_hostname
+              )
+            )
+          }}
         use_certbot: '{{ aadm_enable_https | bool }}'
         tls_domain: >-
           {{
@@ -84,10 +126,37 @@
           }}
         letsencrypt_email: '{{ aadm_tls_email }}'
 
+    - name: Detect installed noVNC web root
+      ansible.builtin.stat:
+        path: '{{ item }}/vnc.html'
+      loop: '{{ aadm_novnc_web_root_candidates }}'
+      register: aadm_novnc_web_root_stats
+      changed_when: false
+
+    - name: Select installed noVNC web root
+      ansible.builtin.set_fact:
+        aadm_novnc_web_root: >-
+          {{
+            (
+              aadm_novnc_web_root_stats.results
+              | selectattr('stat.exists')
+              | map(attribute='item')
+              | first
+            ) | default('')
+          }}
+
+    - name: Assert installed noVNC web root was detected
+      ansible.builtin.assert:
+        that:
+          - aadm_novnc_web_root | length > 0
+        fail_msg: >-
+          Could not locate the installed noVNC web root. Checked:
+          {{ aadm_novnc_web_root_candidates | join(', ') }}
+
     - name: Replace noVNC root landing page with aadm smoke page
       ansible.builtin.template:
         src: '{{ playbook_dir }}/../templates/aadm-smoke-landing.html.j2'
-        dest: /usr/share/novnc/index.html
+        dest: '{{ aadm_novnc_web_root }}/index.html'
         owner: root
         group: root
         mode: '0644'
@@ -144,7 +213,7 @@
         group: '{{ aadm_service_group }}'
         mode: '0700'
 
-    - name: Install VNC xstartup
+    - name: Install elementary VNC xstartup for aadm desktop sessions
       ansible.builtin.copy:
         dest: /var/lib/aadm/.vnc/xstartup
         owner: '{{ aadm_service_user }}'
@@ -154,15 +223,16 @@
           #!/bin/sh
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
-          exec openbox-session
+          export XDG_CURRENT_DESKTOP=Pantheon
+          export XDG_SESSION_DESKTOP=pantheon
+          export XDG_SESSION_TYPE=x11
 
-    - name: Ensure manager Openbox config directory exists
-      ansible.builtin.file:
-        path: /var/lib/aadm/.config/openbox
-        state: directory
-        owner: '{{ aadm_service_user }}'
-        group: '{{ aadm_service_group }}'
-        mode: '0755'
+          dbus-launch --exit-with-session sh -lc "
+            eval \$(echo '' | gnome-keyring-daemon --unlock --components=secrets,pkcs11,ssh 2>/dev/null)
+            export GNOME_KEYRING_CONTROL SSH_AUTH_SOCK
+            gala --replace &
+            exec gnome-session --session=pantheon-vnc
+          "
 
     - name: Ensure vncserver compatibility symlink exists when needed
       ansible.builtin.file:
@@ -303,7 +373,7 @@
       ansible.builtin.blockinfile:
         path: /etc/nginx/sites-available/novnc
         marker: '# {mark} AADM DESKTOP ROUTES'
-        insertbefore: '  # noVNC static \+ websocket proxy'
+        insertbefore: '  # Protected: noVNC static files and WebSocket proxy\.'
         block: |
           include /etc/nginx/conf.d/agent-desktops/*.conf;
       notify: Reload aadm nginx
@@ -322,6 +392,256 @@
         replace: '  ssl_certificate_key {{ aadm_tls_key_path }};'
       notify: Reload aadm nginx
 
+    # ---------------------------------------------------------------------------
+    # ai-agent-bridge (optional — enabled when aadm_install_bridge is true,
+    # or automatically when aadm_secrets_manager_arn is provided)
+    # ---------------------------------------------------------------------------
+
+    - name: Enable bridge when Secrets Manager ARN is provided
+      ansible.builtin.set_fact:
+        aadm_install_bridge: true
+      when: aadm_secrets_manager_arn | length > 0
+
+    - name: Install Docker prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: true
+      when: aadm_install_bridge | bool
+
+    - name: Add Docker GPG key
+      ansible.builtin.shell: |
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+          -o /etc/apt/keyrings/docker.asc
+        chmod a+r /etc/apt/keyrings/docker.asc
+      args:
+        creates: /etc/apt/keyrings/docker.asc
+      when: aadm_install_bridge | bool
+
+    - name: Add Docker apt repository
+      ansible.builtin.shell: |
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+          https://download.docker.com/linux/ubuntu \
+          $(. /etc/os-release && echo "${VERSION_CODENAME}") stable" \
+          > /etc/apt/sources.list.d/docker.list
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+      when: aadm_install_bridge | bool
+
+    - name: Install Docker Engine
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        update_cache: true
+        state: present
+      when: aadm_install_bridge | bool
+
+    - name: Ensure Docker service is enabled and started
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+      when: aadm_install_bridge | bool
+
+    - name: Ensure aadm user is in docker group
+      ansible.builtin.user:
+        name: '{{ aadm_service_user }}'
+        groups: docker
+        append: true
+      when: aadm_install_bridge | bool
+
+    - name: Ensure ubuntu user is in docker group
+      ansible.builtin.user:
+        name: ubuntu
+        groups: docker
+        append: true
+      when: aadm_install_bridge | bool
+
+    - name: Ensure bridge install directory exists
+      ansible.builtin.file:
+        path: '{{ item.path }}'
+        state: directory
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '{{ item.mode }}'
+      loop:
+        - { path: '{{ aadm_bridge_install_dir }}', mode: '0750' }
+        - { path: '{{ aadm_bridge_install_dir }}/config', mode: '0750' }
+        - { path: '{{ aadm_bridge_cert_dir }}', mode: '0755' }
+      when: aadm_install_bridge | bool
+
+    - name: Render bridge configuration
+      ansible.builtin.copy:
+        dest: '{{ aadm_bridge_install_dir }}/config/bridge.yaml'
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0644'
+        content: |
+          server:
+            listen: 0.0.0.0:9445
+          tls:
+            ca_bundle: /app/certs/ca-bundle.crt
+            cert:     /app/certs/bridge.crt
+            key:      /app/certs/bridge.key
+          feature_flags:
+            provider_fallbacks: false
+          sessions:
+            max_per_project: 5
+            max_global: 20
+            idle_timeout: 30m
+          providers:
+            claude:
+              binary: node
+              args: ["./node_modules/@anthropic-ai/claude-code/cli.js", "--verbose"]
+              startup_timeout: 60s
+              validate_startup: false
+              prompt_pattern: "(?m)(❯|>\\s*$)"
+              required_env: [ANTHROPIC_API_KEY]
+          allowed_paths:
+            - /app/data/workspaces
+            - /opt/ai-agent-desktop-manager/data/workspaces
+            - /tmp
+          logging:
+            format: json
+            level: info
+      notify: Restart bridge service
+      when: aadm_install_bridge | bool
+
+    - name: Fetch bridge API keys from Secrets Manager
+      ansible.builtin.command:
+        cmd: >-
+          aws secretsmanager get-secret-value
+          --secret-id {{ aadm_secrets_manager_arn }}
+          --query SecretString
+          --output text
+      delegate_to: localhost
+      become: false
+      register: aadm_secrets_manager_raw
+      changed_when: false
+      when:
+        - aadm_install_bridge | bool
+        - aadm_secrets_manager_arn | length > 0
+
+    - name: Set API key facts from Secrets Manager secret
+      ansible.builtin.set_fact:
+        aadm_anthropic_api_key: "{{ (aadm_secrets_manager_raw.stdout | from_json).ANTHROPIC_API_KEY | default('') }}"
+        aadm_openai_api_key: "{{ (aadm_secrets_manager_raw.stdout | from_json).OPENAI_API_KEY | default('') }}"
+        aadm_gemini_api_key: "{{ (aadm_secrets_manager_raw.stdout | from_json).GEMINI_API_KEY | default('') }}"
+      when:
+        - aadm_install_bridge | bool
+        - aadm_secrets_manager_arn | length > 0
+
+    - name: Render bridge environment file
+      ansible.builtin.copy:
+        dest: '{{ aadm_bridge_install_dir }}/.env'
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0640'
+        content: |
+          ANTHROPIC_API_KEY={{ aadm_anthropic_api_key }}
+          OPENAI_API_KEY={{ aadm_openai_api_key }}
+          GEMINI_API_KEY={{ aadm_gemini_api_key }}
+      notify: Restart bridge service
+      when: aadm_install_bridge | bool
+
+    - name: Install bridge systemd service
+      ansible.builtin.copy:
+        src: '{{ aadm_install_dir }}/systemd/bridge.service'
+        dest: /etc/systemd/system/bridge.service
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload and restart bridge service
+      when: aadm_install_bridge | bool
+
+    - name: Ensure AADM state and workspace directories are pre-created with correct ownership
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: '{{ aadm_service_user }}'
+        group: '{{ aadm_service_group }}'
+        mode: '0755'
+      loop:
+        - '{{ aadm_state_dir }}'
+        - '{{ aadm_state_dir }}/workspaces'
+      when: aadm_install_bridge | bool
+
+    - name: Pull ai-agent-bridge image
+      community.docker.docker_image:
+        name: '{{ aadm_bridge_image }}'
+        source: pull
+      become_user: '{{ aadm_service_user }}'
+      notify: Restart bridge service
+      when: aadm_install_bridge | bool
+
+    - name: Enable and start bridge service
+      ansible.builtin.systemd:
+        name: bridge.service
+        enabled: true
+        state: started
+      when: aadm_install_bridge | bool
+
+    - name: Apply pending bridge service changes before readiness checks
+      ansible.builtin.meta: flush_handlers
+      when: aadm_install_bridge | bool
+
+    - name: Wait for bridge gRPC port to open
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 9445
+        timeout: 120
+      when: aadm_install_bridge | bool
+
+    - name: Wait for bridge to write client cert to host volume
+      ansible.builtin.wait_for:
+        path: '{{ aadm_bridge_cert_dir }}/client.crt'
+        timeout: 60
+      when: aadm_install_bridge | bool
+
+    - name: Wait for bridge to write CA bundle to host volume
+      ansible.builtin.wait_for:
+        path: '{{ aadm_bridge_cert_dir }}/ca-bundle.crt'
+        timeout: 30
+      when: aadm_install_bridge | bool
+
+    - name: Set bridge address for AADM when bridge is installed locally
+      ansible.builtin.set_fact:
+        aadm_bridge_addr: '127.0.0.1:9445'
+        aadm_bridge_ca_cert_path: '{{ aadm_bridge_cert_dir }}/ca-bundle.crt'
+        aadm_bridge_client_cert_path: '{{ aadm_bridge_cert_dir }}/client.crt'
+        aadm_bridge_client_key_path: '{{ aadm_bridge_cert_dir }}/client.key'
+      when: aadm_install_bridge | bool
+
+    - name: Set empty bridge cert paths when bridge is not installed
+      ansible.builtin.set_fact:
+        aadm_bridge_ca_cert_path: ''
+        aadm_bridge_client_cert_path: ''
+        aadm_bridge_client_key_path: ''
+      when: not (aadm_install_bridge | bool)
+
+    - name: Derive manager public base URL for smoke host
+      ansible.builtin.set_fact:
+        aadm_manager_public_base_url: >-
+          {{
+            aadm_public_base_url
+            if (aadm_public_base_url | length > 0)
+            else (
+              'https://' ~ (
+                aadm_tls_domain
+                if (aadm_enable_https | bool and aadm_tls_domain | length > 0)
+                else inventory_hostname
+              )
+            )
+          }}
+
     - name: Render manager environment
       ansible.builtin.copy:
         dest: '{{ aadm_install_dir }}/.env'
@@ -332,15 +652,16 @@
           AADM_HOST=127.0.0.1
           AADM_PORT=8899
           AADM_AUTH_TOKEN={{ aadm_auth_token }}
-            AADM_DESKTOP_ROUTE_AUTH_MODE=token
+          AADM_DESKTOP_ROUTE_AUTH_MODE=token
           AADM_DESKTOP_ROUTE_AUTH_REQUEST_URL=
           AADM_DESKTOP_ROUTE_AUTH_REQUEST_HEADERS=
           AADM_DESKTOP_ROUTE_TOKEN_SECRET={{ aadm_desktop_route_token_secret }}
           AADM_DESKTOP_ROUTE_TOKEN_TTL_SECONDS=900
-          AADM_PUBLIC_BASE_URL={{ aadm_public_base_url }}
+          AADM_PUBLIC_BASE_URL={{ aadm_manager_public_base_url }}
           AADM_NGINX_SNIPPET_DIR={{ aadm_nginx_snippet_dir }}
           AADM_STATE_DIR={{ aadm_state_dir }}
-          AADM_DISPLAY_MIN=2
+          AADM_WORKSPACE_ROOT_DIR={{ aadm_state_dir }}/workspaces
+          AADM_DISPLAY_MIN={{ aadm_manager_display_min }}
           AADM_DISPLAY_MAX=11
           AADM_WEBSOCKIFY_PORT_MIN=6081
           AADM_WEBSOCKIFY_PORT_MAX=6090
@@ -348,6 +669,10 @@
           AADM_CDP_PORT_MAX=9231
           AADM_AAB_PORT_MIN=8765
           AADM_AAB_PORT_MAX=8774
+          AADM_BRIDGE_ADDR={{ aadm_bridge_addr }}
+          AADM_BRIDGE_CA_CERT_PATH={{ aadm_bridge_ca_cert_path }}
+          AADM_BRIDGE_CLIENT_CERT_PATH={{ aadm_bridge_client_cert_path }}
+          AADM_BRIDGE_CLIENT_KEY_PATH={{ aadm_bridge_client_key_path }}
           AADM_NGINX_BIN=/usr/sbin/nginx
           AADM_SYSTEMCTL_BIN=/bin/systemctl
           AADM_UNIT_VNC=vnc@
@@ -391,7 +716,7 @@
 
     - name: Reset failed state for smoke-test units
       ansible.builtin.command:
-        cmd: systemctl reset-failed aadm.service vnc@1 websockify@1 chrome@1 aab@1
+        cmd: systemctl reset-failed aadm.service vnc@1 websockify@1 chrome@1 aab@1 vnc@2 websockify@2 chrome@2 aab@2
       changed_when: false
       failed_when: false
 
@@ -410,6 +735,64 @@
       retries: 20
       delay: 3
       until: aadm_health.status == 200
+
+    - name: List existing desktops
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8899/v1/desktops
+        method: GET
+        return_content: true
+        status_code: 200
+      register: aadm_existing_desktops
+
+    - name: Destroy previous default desktop (desk-1) if present
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:8899/v1/desktops/{{ item.id }}'
+        method: DELETE
+        return_content: true
+        status_code: 200
+      loop: >-
+        {{
+          (aadm_existing_desktops.json.desktops | default([]))
+          | selectattr('owner', 'equalto', 'default')
+          | list
+        }}
+      loop_control:
+        label: '{{ item.id }}'
+
+    - name: Create default base desktop (desk-1)
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8899/v1/desktops
+        method: POST
+        body_format: json
+        body:
+          owner: default
+          label: base-desktop
+          routeAuthMode: token
+        return_content: true
+        status_code: 200
+      register: aadm_default_desktop
+
+    - name: Wait for default desktop websockify port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: '{{ (6081 - aadm_manager_display_min) + (aadm_default_desktop.json.display | int) }}'
+        timeout: 30
+
+    - name: Destroy previous smoke-test desktops
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:8899/v1/desktops/{{ item.id }}'
+        method: DELETE
+        return_content: true
+        status_code: 200
+      loop: >-
+        {{
+          (aadm_existing_desktops.json.desktops | default([]))
+          | selectattr('owner', 'equalto', 'smoke-test')
+          | list
+        }}
+      loop_control:
+        label: '{{ item.id }}'
+      when: aadm_smoke_create_desktop | bool
 
     - name: Create smoke desktop
       ansible.builtin.uri:
@@ -430,27 +813,27 @@
     - name: Wait for smoke desktop websockify port
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: '{{ (6081 - 2) + (aadm_create.json.display | int) }}'
+        port: '{{ (6081 - aadm_manager_display_min) + (aadm_create.json.display | int) }}'
         timeout: 30
       when: aadm_smoke_create_desktop | bool
 
     - name: Wait for smoke desktop CDP port
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: '{{ (9222 - 2) + (aadm_create.json.display | int) }}'
+        port: '{{ (9222 - aadm_manager_display_min) + (aadm_create.json.display | int) }}'
         timeout: 30
       when: aadm_smoke_create_desktop | bool
 
     - name: Wait for smoke desktop aab port
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: '{{ (8765 - 2) + (aadm_create.json.display | int) }}'
+        port: '{{ (8765 - aadm_manager_display_min) + (aadm_create.json.display | int) }}'
         timeout: 30
       when: aadm_smoke_create_desktop | bool
 
     - name: Run doctor on smoke desktop
       ansible.builtin.uri:
-        url: "http://127.0.0.1:8899/v1/desktops/{{ (aadm_create.json.id | default('desk-1')) }}/doctor"
+        url: "http://127.0.0.1:8899/v1/desktops/{{ (aadm_create.json.id | default('desk-2')) }}/doctor"
         return_content: true
         status_code: 200
       register: aadm_doctor
@@ -480,6 +863,65 @@
       register: aadm_novnc
       when: aadm_smoke_create_desktop | bool
 
+    - name: Verify required services are active after smoke provisioning
+      ansible.builtin.command:
+        cmd: systemctl is-active {{ item }}
+      register: aadm_required_services
+      changed_when: false
+      loop:
+        - docker
+        - aadm.service
+        - nginx
+
+    - name: Assert required services are active after smoke provisioning
+      ansible.builtin.assert:
+        that:
+          - item.rc == 0
+          - (item.stdout | trim) == 'active'
+        fail_msg: >-
+          Required service {{ item.item }} is not active after smoke provisioning.
+          systemctl is-active returned rc={{ item.rc }} stdout="{{ item.stdout | trim }}"
+      loop: '{{ aadm_required_services.results }}'
+      loop_control:
+        label: '{{ item.item }}'
+
+    - name: Verify bridge service is active after smoke provisioning
+      ansible.builtin.command:
+        cmd: systemctl is-active bridge.service
+      register: aadm_bridge_service_status
+      changed_when: false
+      when: aadm_install_bridge | bool
+
+    - name: Assert bridge service is active after smoke provisioning
+      ansible.builtin.assert:
+        that:
+          - aadm_bridge_service_status.rc == 0
+          - (aadm_bridge_service_status.stdout | trim) == 'active'
+        fail_msg: >-
+          bridge.service is not active after smoke provisioning.
+          systemctl is-active returned rc={{ aadm_bridge_service_status.rc }}
+          stdout="{{ aadm_bridge_service_status.stdout | trim }}"
+      when: aadm_install_bridge | bool
+
+    - name: Inspect bridge container API key environment after smoke provisioning
+      ansible.builtin.command:
+        cmd: >-
+          docker exec ai-agent-bridge /usr/bin/env
+      register: aadm_bridge_container_env
+      changed_when: false
+      when: aadm_install_bridge | bool
+
+    - name: Assert bridge container received expanded API key values
+      ansible.builtin.assert:
+        that:
+          - "'ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY' not in aadm_bridge_container_env.stdout"
+          - "'OPENAI_API_KEY=$OPENAI_API_KEY' not in aadm_bridge_container_env.stdout"
+          - "'GEMINI_API_KEY=$GEMINI_API_KEY' not in aadm_bridge_container_env.stdout"
+        fail_msg: >-
+          ai-agent-bridge container still has literal API key placeholders in its environment.
+          bridge.service did not expand one or more provider API key variables before docker run.
+      when: aadm_install_bridge | bool
+
     - name: Destroy smoke desktop when requested
       ansible.builtin.uri:
         url: 'http://127.0.0.1:8899/v1/desktops/{{ aadm_create.json.id }}'
@@ -503,7 +945,7 @@
             "novncBaseUrl": {{ ('https://' ~ aadm_tls_domain ~ '/') | to_json }},
             "novnc_status": {{ aadm_novnc.status | default(0) }},
             "novnc_redirect_location": {{ aadm_novnc.location | default('') | to_json }},
-            "vnc_auth": "novnc_openbox_vnc_password",
+            "vnc_auth": "novnc_desktop_vnc_password",
             "vnc_password": {{ aadm_vnc_password | to_json }}
           }
 
@@ -514,6 +956,7 @@
           - '  aadm create --owner smoke --label first --ttl 60 --start-url https://example.com'
           - '  aadm create --owner smoke --label protected --route-auth-mode token'
           - '  aadm access-url --id desk-1'
+          - '  aadm terminal-access --id desk-1'
           - '  aadm list'
           - '  aadm doctor --id desk-1'
           - '  aadm destroy --id desk-1'
@@ -532,6 +975,18 @@
       ansible.builtin.systemd:
         name: nginx
         state: reloaded
+    - name: Reload and restart bridge service
+      ansible.builtin.systemd:
+        daemon_reload: true
+      listen: Reload and restart bridge service
+    - name: Restart bridge service
+      ansible.builtin.systemd:
+        name: bridge.service
+        enabled: true
+        state: restarted
+      listen:
+        - Reload and restart bridge service
+        - Restart bridge service
     - name: Restart aadm
       ansible.builtin.systemd:
         name: aadm.service

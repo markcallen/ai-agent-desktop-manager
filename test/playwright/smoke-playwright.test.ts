@@ -12,7 +12,7 @@
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import type { BrowserContext } from 'playwright-core';
+import type { BrowserContext, Page } from 'playwright-core';
 import { maybeEnterPassword } from '../../smoke/browser-smoke.mjs';
 
 // ---------------------------------------------------------------------------
@@ -29,8 +29,17 @@ const PUBLIC_BASE_URL = (process.env.SMOKE_PUBLIC_BASE_URL ?? '').replace(
   /\/$/,
   ''
 );
-const SMOKE_ACCESS_URL = process.env.SMOKE_ACCESS_URL ?? '';
 const VNC_PASSWORD = process.env.SMOKE_VNC_PASSWORD ?? 'SmokePassw0rd!';
+
+// ---------------------------------------------------------------------------
+// Smoke desktop — created fresh each run, deleted on completion
+// ---------------------------------------------------------------------------
+
+let smokeDesktop: {
+  id: string;
+  display: number;
+  accessUrl: string;
+} | null = null;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,6 +99,48 @@ async function withBrowser<T>(
   }
 }
 
+async function desktopFrame(page: Page) {
+  const frameHandle = await page
+    .waitForSelector('iframe[data-aadm-desktop-frame]', {
+      timeout: 5000,
+      state: 'attached'
+    })
+    .catch(() => null);
+
+  return (await frameHandle?.contentFrame()) ?? null;
+}
+
+async function canvasDimensions(page: Page) {
+  const frame = await desktopFrame(page);
+  const target = frame ?? page;
+  return await target.evaluate(() => {
+    const c = document.querySelector('canvas');
+    return c ? { w: c.width, h: c.height } : null;
+  });
+}
+
+async function expectTerminalReady(page: Page) {
+  // Use state:'attached' because these mounts are inside hidden tab panels
+  // in the 3-tab layout and are not visible until the Terminal tab is active.
+  await page.waitForSelector('#terminal-mount', { state: 'attached' });
+  await page.waitForSelector('#agent-terminal-mount', { state: 'attached' });
+  await page.waitForFunction(
+    () => {
+      const status = document.querySelector('#terminal-status');
+      if (!(status instanceof HTMLElement)) return false;
+      const text = status.textContent ?? '';
+      return (
+        !/failed to load|connection failed|closed/i.test(text) &&
+        /attached to tmux session|connected to tmux session/i.test(text) &&
+        Boolean(document.querySelector('#terminal-mount .xterm')) &&
+        Boolean(document.querySelector('#agent-terminal-mount .xterm'))
+      );
+    },
+    undefined,
+    { timeout: 30000 }
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Created desktop IDs — cleaned up by after() hook on any test failure
 // ---------------------------------------------------------------------------
@@ -132,7 +183,72 @@ before(async () => {
       'SMOKE_PUBLIC_BASE_URL is required for browser tests — set via smoke-playwright.sh --test'
     );
   }
+
+  // Delete any stale smoke-test desktops left over from a previous run so
+  // lifecycle tests do not hit 409 Conflict on create.
+  const listRes = await api('GET', '/v1/desktops').catch(() => null);
+  if (listRes?.ok) {
+    const body = (await listRes.json()) as {
+      desktops: Array<{ id: string; owner?: string }>;
+    };
+    await Promise.all(
+      (body.desktops ?? [])
+        .filter((d) => d.owner === 'smoke-test')
+        .map((d) => api('DELETE', `/v1/desktops/${d.id}`).catch(() => {}))
+    );
+  }
+
+  // Create the desktop used by browser-based smoke tests.  A unique label
+  // prevents collisions when runs overlap; the desktop is cleaned up by the
+  // after() hook regardless of test outcome.
+  const sdRes = await api('POST', '/v1/desktops', {
+    owner: 'smoke-test',
+    label: `smoke-tab-${Date.now()}`,
+    ttlMinutes: 60,
+    startUrl: 'https://example.com',
+    routeAuthMode: 'token'
+  });
+  if (!sdRes.ok) {
+    throw new Error(
+      `before() failed to create smoke desktop: HTTP ${sdRes.status} — ${await sdRes.text()}`
+    );
+  }
+  const sdBody = (await sdRes.json()) as {
+    id: string;
+    display: number;
+    accessUrl: string;
+  };
+  smokeDesktop = sdBody;
+  trackId(sdBody.id);
 });
+
+test(
+  'smoke host: root noVNC on :1 renders canvas',
+  { skip: SKIP ? SKIP_REASON : false, timeout: 180_000 },
+  async () => {
+    await withBrowser(async (ctx) => {
+      const page = await ctx.newPage();
+      await page.goto(
+        `${PUBLIC_BASE_URL}/vnc.html?autoconnect=1&resize=remote`,
+        {
+          waitUntil: 'domcontentloaded',
+          timeout: 30_000
+        }
+      );
+
+      await maybeEnterPassword(page, VNC_PASSWORD);
+
+      const dims = await page.evaluate(() => {
+        const c = document.querySelector('canvas');
+        return c ? { w: c.width, h: c.height } : null;
+      });
+      assert.ok(
+        dims && dims.w > 0 && dims.h > 0,
+        `root noVNC desktop rendered ${JSON.stringify(dims)}`
+      );
+    });
+  }
+);
 
 // ---------------------------------------------------------------------------
 // 1. Health endpoint
@@ -378,7 +494,7 @@ test(
 
     // --- browser: token flow → canvas ---
     await t.test(
-      'browser: accessUrl redirects to noVNC, canvas renders',
+      'browser: accessUrl loads shell and embedded canvas renders',
       { timeout: 180_000 },
       async () => {
         const freshRes = await api(
@@ -395,11 +511,16 @@ test(
             timeout: 30_000
           });
 
-          // After following the 302, we should be on vnc.html
           assert.ok(
-            page.url().includes('/vnc.html'),
-            `expected redirect to vnc.html, got ${page.url()}`
+            page.url().includes(`/desktop/${desktop.display}/`),
+            `expected redirect to shell route, got ${page.url()}`
           );
+          // These elements are in hidden tab panels — use state:'attached'
+          await page.waitForSelector('iframe[data-aadm-desktop-frame]', {
+            state: 'attached'
+          });
+          await page.waitForSelector('#terminal-mount', { state: 'attached' });
+          await expectTerminalReady(page);
 
           // Cookie must be set with the correct path
           const cookies = await ctx.cookies();
@@ -412,12 +533,11 @@ test(
             `cookie path should start with /desktop/${desktop.display}/`
           );
 
+          // Switch to noVNC tab so the iframe is visible before checking canvas
+          await page.click('[data-tab-btn="novnc"]', { force: true });
           await maybeEnterPassword(page, VNC_PASSWORD);
 
-          const dims = await page.evaluate(() => {
-            const c = document.querySelector('canvas');
-            return c ? { w: c.width, h: c.height } : null;
-          });
+          const dims = await canvasDimensions(page);
           assert.ok(
             dims && dims.w > 0 && dims.h > 0,
             `canvas rendered ${JSON.stringify(dims)}`
@@ -471,35 +591,33 @@ test(
 // ---------------------------------------------------------------------------
 
 test(
-  'summary desktop: fresh access URL loads canvas',
-  {
-    skip:
-      SKIP || !SMOKE_ACCESS_URL
-        ? SKIP
-          ? SKIP_REASON
-          : 'no SMOKE_ACCESS_URL — summary desktop may have been destroyed'
-        : false,
-    timeout: 180_000
-  },
+  'smoke desktop: fresh access URL loads shell and canvas renders',
+  { skip: SKIP ? SKIP_REASON : false, timeout: 180_000 },
   async () => {
+    const sd = smokeDesktop!;
     await withBrowser(async (ctx) => {
       const page = await ctx.newPage();
-      await page.goto(SMOKE_ACCESS_URL, {
+      await page.goto(sd.accessUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 30_000
       });
 
       assert.ok(
-        page.url().includes('/vnc.html'),
-        `expected redirect to vnc.html, got ${page.url()}`
+        page.url().includes(`/desktop/${sd.display}/`),
+        `expected shell route for display ${sd.display}, got ${page.url()}`
       );
+      // These elements are in hidden tab panels — use state:'attached'
+      await page.waitForSelector('iframe[data-aadm-desktop-frame]', {
+        state: 'attached'
+      });
+      await page.waitForSelector('#terminal-mount', { state: 'attached' });
+      await expectTerminalReady(page);
 
+      // Switch to noVNC tab so the iframe is visible before checking canvas
+      await page.click('[data-tab-btn="novnc"]', { force: true });
       await maybeEnterPassword(page, VNC_PASSWORD);
 
-      const dims = await page.evaluate(() => {
-        const c = document.querySelector('canvas');
-        return c ? { w: c.width, h: c.height } : null;
-      });
+      const dims = await canvasDimensions(page);
       assert.ok(
         dims && dims.w > 0 && dims.h > 0,
         `canvas rendered ${JSON.stringify(dims)}`
@@ -649,6 +767,329 @@ test(
         untrackId(desktop.id);
       }
     );
+  }
+);
+
+// ---------------------------------------------------------------------------
+// 8. 3-tab layout: verify each panel loads correctly via access URL
+// ---------------------------------------------------------------------------
+
+test(
+  'tab layout: AI Agent, Terminal (tmux), and noVNC panels each load correctly',
+  { skip: SKIP ? SKIP_REASON : false, timeout: 360_000 },
+  async (t) => {
+    const sd = smokeDesktop!;
+    await withBrowser(async (ctx) => {
+      const page = await ctx.newPage();
+      await page.goto(sd.accessUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30_000
+      });
+
+      // Confirm redirect to shell route
+      assert.ok(
+        page.url().includes(`/desktop/${sd.display}/`),
+        `expected shell route for display ${sd.display}, got ${page.url()}`
+      );
+
+      // Tab bar must be present with 3 tabs
+      await page.waitForSelector('#aadm-tab-bar', { timeout: 10_000 });
+      const tabCount = await page.evaluate(
+        () => document.querySelectorAll('[data-tab-btn]').length
+      );
+      assert.equal(tabCount, 3, '3 tab buttons present');
+
+      // ----- Tab 1: AI Agent (active by default) ----------------------------
+      await t.test('AI Agent tab: provider and controls visible', async () => {
+        await page.waitForSelector('#agent-status', { timeout: 15_000 });
+        await page.waitForSelector('#agent-terminal-mount', {
+          timeout: 15_000
+        });
+
+        const hasClaudeOption = await page.evaluate(() => {
+          const select = document.querySelector('#agent-provider');
+          if (!(select instanceof HTMLSelectElement)) return false;
+          return Array.from(select.options).some((o) => o.value === 'claude');
+        });
+        assert.ok(hasClaudeOption, 'agent-provider has "claude" option');
+
+        const hasControls = await page.evaluate(
+          () =>
+            Boolean(document.querySelector('#agent-start')) ||
+            Boolean(document.querySelector('#agent-stop'))
+        );
+        assert.ok(hasControls, 'agent start or stop control present');
+      });
+
+      // ----- Tab 2: Terminal (tmux) -----------------------------------------
+      await t.test(
+        'Terminal tab: tmux attaches with at least 1 window',
+        async () => {
+          // Use force:true to bypass stability check — xterm initialization can
+          // briefly cause layout shifts that make the tab bar "not stable".
+          await page.click('[data-tab-btn="terminal"]', { force: true });
+          await page.waitForSelector('#terminal-mount', { timeout: 15_000 });
+
+          // Wait for tmux to attach AND confirm the session name in one function
+          // so there is no race between the waitForFunction and a subsequent evaluate.
+          await page.waitForFunction(
+            () => {
+              const status = document.querySelector('#terminal-status');
+              if (!(status instanceof HTMLElement)) return false;
+              const text = status.textContent ?? '';
+              return (
+                /attached to tmux session/i.test(text) &&
+                /aadm-desk/i.test(text)
+              );
+            },
+            undefined,
+            { timeout: 60_000 }
+          );
+
+          // xterm rendered inside mount
+          await page.waitForSelector('#terminal-mount .xterm', {
+            timeout: 15_000
+          });
+        }
+      );
+
+      // ----- Tab 3: noVNC (Chrome desktop) ----------------------------------
+      await t.test(
+        'noVNC tab: iframe canvas renders Chrome desktop',
+        async () => {
+          await page.click('[data-tab-btn="novnc"]', { force: true });
+
+          const frameHandle = await page.waitForSelector(
+            'iframe[data-aadm-desktop-frame]',
+            { state: 'attached', timeout: 15_000 }
+          );
+          const frame = await frameHandle.contentFrame();
+          assert.ok(frame, 'contentFrame available');
+
+          // Enter VNC password if needed and wait for canvas
+          await maybeEnterPassword(page, VNC_PASSWORD);
+
+          const dims = await canvasDimensions(page);
+          assert.ok(
+            dims && dims.w > 0 && dims.h > 0,
+            `noVNC canvas rendered ${JSON.stringify(dims)}`
+          );
+        }
+      );
+    });
+  }
+);
+
+// ---------------------------------------------------------------------------
+// 9. smoke desktop validation: AI Agent errors, Terminal ls -al, Desktop Chrome
+// ---------------------------------------------------------------------------
+
+test(
+  'smoke desktop: AI Agent tab has no errors, Terminal runs ls -al, Desktop tab shows Chrome running',
+  { skip: SKIP ? SKIP_REASON : false, timeout: 360_000 },
+  async (t) => {
+    const sd = smokeDesktop!;
+    await withBrowser(async (ctx) => {
+      const page = await ctx.newPage();
+      await page.goto(sd.accessUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30_000
+      });
+
+      assert.ok(
+        page.url().includes(`/desktop/${sd.display}/`),
+        `expected shell route for display ${sd.display}, got ${page.url()}`
+      );
+
+      await page.waitForSelector('#aadm-tab-bar', { timeout: 10_000 });
+
+      // ----- Sub-test 1: AI Agent tab has no errors -------------------------
+      await t.test(
+        'AI Agent tab: no errors displayed (bridge must be running)',
+        async () => {
+          // AI Agent tab is active by default; wait for status element
+          await page.waitForSelector('#agent-status', { timeout: 15_000 });
+
+          // Wait for the WebSocket connection attempt to settle
+          await page.waitForFunction(
+            () => {
+              const statusText = document
+                .querySelector('#agent-status span:last-child')
+                ?.textContent?.toLowerCase()
+                ?.trim();
+              return (
+                statusText === 'connected' ||
+                statusText === 'disconnected' ||
+                statusText === 'error'
+              );
+            },
+            undefined,
+            { timeout: 30_000 }
+          );
+
+          // ErrorSummary renders a <details> element only when errors exist.
+          // Its presence means an error occurred (e.g. bridge not running).
+          const hasErrorSummary = await page.evaluate(() =>
+            Boolean(document.querySelector('details'))
+          );
+          assert.equal(
+            hasErrorSummary,
+            false,
+            'ErrorSummary <details> element must not be present — bridge server may not be running'
+          );
+
+          // Connection status must not be "error"
+          const connectionStatus = await page.evaluate(
+            () =>
+              document
+                .querySelector('#agent-status span:last-child')
+                ?.textContent?.toLowerCase()
+                ?.trim() ?? null
+          );
+          assert.notEqual(
+            connectionStatus,
+            'error',
+            `Bridge connection status is "${connectionStatus}", expected not "error"`
+          );
+        }
+      );
+
+      // ----- Sub-test 2: Terminal tab — ls -al returns a directory listing ---
+      await t.test(
+        'Terminal tab: typing ls -al returns a directory listing',
+        async () => {
+          await page.click('[data-tab-btn="terminal"]', { force: true });
+          await page.waitForSelector('#terminal-mount', { timeout: 15_000 });
+
+          // Wait for tmux to attach before sending input
+          await page.waitForFunction(
+            () => {
+              const status = document.querySelector('#terminal-status');
+              if (!(status instanceof HTMLElement)) return false;
+              return /attached to tmux session/i.test(status.textContent ?? '');
+            },
+            undefined,
+            { timeout: 60_000 }
+          );
+
+          await page.waitForSelector('#terminal-mount .xterm', {
+            timeout: 15_000
+          });
+
+          // Click the terminal display area, then explicitly focus xterm's hidden
+          // textarea so keyboard events are captured by xterm (the click focuses
+          // it asynchronously; without this the keystrokes may go nowhere).
+          // The session is already attached — no need to press Enter first to
+          // get a prompt. The tmux status bar occupies the last terminal row so
+          // a "[$#]\s*$" end-of-string check would never match; skip it entirely.
+          await page.click('#terminal-mount .xterm-screen', { force: true });
+          await page.evaluate(() => {
+            const ta = document.querySelector<HTMLTextAreaElement>(
+              '#terminal-mount .xterm-helper-textarea'
+            );
+            ta?.focus();
+          });
+
+          // Type the command and submit
+          await page.keyboard.type('ls -al');
+          await page.keyboard.press('Enter');
+
+          // xterm renders text into .xterm-rows; wait for a line starting with
+          // "total <number>" which is the first line of every ls -al listing
+          await page.waitForFunction(
+            () => {
+              const rows = document.querySelector(
+                '#terminal-mount .xterm-rows'
+              );
+              return /total\s+\d+/.test(rows?.textContent ?? '');
+            },
+            undefined,
+            { timeout: 30_000 }
+          );
+
+          const terminalText = await page.evaluate(
+            () =>
+              document.querySelector('#terminal-mount .xterm-rows')
+                ?.textContent ?? ''
+          );
+          assert.match(
+            terminalText,
+            /total\s+\d+/,
+            'Terminal output should contain a directory listing ("total N" line from ls -al)'
+          );
+        }
+      );
+
+      // ----- Sub-test 3: Desktop tab — Connect if needed, Chrome running ----
+      await t.test(
+        'Desktop tab: noVNC canvas renders and Chrome service is running',
+        async () => {
+          await page.click('[data-tab-btn="novnc"]', { force: true });
+
+          const frameHandle = await page.waitForSelector(
+            'iframe[data-aadm-desktop-frame]',
+            { state: 'attached', timeout: 15_000 }
+          );
+          const frame = await frameHandle.contentFrame();
+          assert.ok(frame, 'noVNC iframe contentFrame is available');
+
+          // Click the noVNC Connect button if it is visible (not yet auto-connected)
+          const connectClicked = await frame.evaluate(() => {
+            const btn =
+              document.querySelector<HTMLElement>('#noVNC_connect_button') ??
+              (Array.from(
+                document.querySelectorAll<HTMLElement>(
+                  "button, input[type='button']"
+                )
+              ).find((el) =>
+                /^connect$/i.test(
+                  el.textContent?.trim() ?? (el as HTMLInputElement).value ?? ''
+                )
+              ) as HTMLElement | undefined);
+            if (btn && !btn.hidden && btn.offsetParent !== null) {
+              btn.click();
+              return true;
+            }
+            return false;
+          });
+
+          if (connectClicked) {
+            await maybeEnterPassword(page, VNC_PASSWORD);
+          }
+
+          // Wait for the canvas to have non-zero dimensions (desktop is rendering)
+          await frame.waitForFunction(
+            () => {
+              const canvas = document.querySelector('canvas');
+              return Boolean(canvas && canvas.width > 0 && canvas.height > 0);
+            },
+            undefined,
+            { timeout: 60_000 }
+          );
+
+          const dims = await canvasDimensions(page);
+          assert.ok(
+            dims && dims.w > 0 && dims.h > 0,
+            `noVNC canvas rendered ${JSON.stringify(dims)} — desktop session is active`
+          );
+
+          // Confirm Chrome is running via the doctor endpoint
+          const doctorRes = await api(
+            'GET',
+            `/v1/desktops/${sd.id}/doctor`
+          ).catch(() => null);
+          assert.ok(doctorRes?.ok, `doctor endpoint for ${sd.id} must respond`);
+          const doc = (await doctorRes!.json()) as {
+            checks?: { services?: Record<string, boolean> };
+          };
+          assert.equal(
+            doc.checks?.services?.chrome,
+            true,
+            `Chrome service must be running on ${sd.id} (doctor check)`
+          );
+        }
+      );
+    });
   }
 );
 

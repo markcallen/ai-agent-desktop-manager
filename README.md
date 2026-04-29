@@ -30,7 +30,7 @@ noVNC is the _human_ view. Agents need DevTools-grade access. The combo looks li
 
 On the Linux host:
 
-- A working noVNC/Openbox stack (your `novnc-openbox` project is perfect)
+- A working `novnc-desktop` stack for the base desktop substrate
 - Nginx serving noVNC via websockify
 - Node.js 22+ (see `.nvmrc` for recommended version)
 - systemd (recommended)
@@ -166,7 +166,7 @@ When route protection is enabled, each desktop snippet also includes an internal
 
 ### Optional HTTPS with certbot
 
-The EC2 smoke helper now uses `novnc-openbox` release `v0.1.0` to provision the base Openbox/noVNC/nginx/auth/TLS stack. This repo only layers the manager and its dynamic desktop routes on top.
+The EC2 smoke helper now installs `markcallen.novnc_desktop` from GitHub at `v0.1.3` to provision the base desktop/noVNC/nginx/auth/TLS stack. This repo only layers the manager and its dynamic desktop routes on top.
 
 The smoke/deployment helper can request a certificate with certbot and nginx HTTP-01 when you have:
 
@@ -231,7 +231,46 @@ Notes:
 - DNS changes must have propagated before certbot runs.
 - For repeated smoke runs, reuse the delegated zone and let Terraform rotate the per-run hostname.
 - `./scripts/ec2-smoke-test.sh run` writes `infra/smoke-test/.runtime/aadm-smoke-summary.json`, and `./scripts/smoke-playwright.sh` can replay a browser smoke test from that summary in CI or locally.
-- `npm run smoke:playwright-test` calls `./scripts/smoke-playwright.sh --test`, which loads the same summary and runs the Playwright smoke assertion instead of taking a screenshot.
+- `npm run test:smoke` and `npm run smoke:playwright-test` provision EC2, run the remote Playwright smoke assertion, and destroy the stack automatically on pass or fail. Put the smoke settings in `.env.smoke.local` first.
+- `npm run test:smoke:debug` and `npm run smoke:playwright-test:debug` leave the EC2 instance running after the smoke test so you can debug it manually.
+- `npm run smoke:playwright-test:status` reprints the saved SSH, health, noVNC, and destroy commands for the active smoke stack.
+- `npm run smoke:playwright-test:existing` still targets an already-provisioned smoke host by calling `./scripts/smoke-playwright.sh --test`.
+
+### Smoke Test Workflow
+
+Create a local smoke env file once:
+
+```bash
+cp .env.smoke.example .env.smoke.local
+```
+
+Set at least these values in `.env.smoke.local`:
+
+```bash
+SMOKE_AWS_REGION=us-east-2
+SMOKE_TLS_DOMAIN=smoke.markcallen.dev
+SMOKE_TLS_EMAIL=ops@example.com
+```
+
+Then use the smoke commands like this:
+
+```bash
+# Provision EC2, run the smoke test, always destroy the stack.
+npm run test:smoke
+
+# Provision EC2, run the smoke test, keep the stack alive for debugging.
+npm run test:smoke:debug
+
+# Reprint the saved SSH, health, noVNC, and destroy commands for the current stack.
+npm run smoke:playwright-test:status
+
+# Re-run the Playwright assertion against the existing keep-alive smoke host.
+npm run smoke:playwright-test:existing
+```
+
+The smoke npm scripts load `.env.smoke.local` automatically. If that file is missing, they fall back to `.env.smoke`.
+
+When you rerun the keep-alive flow, the provisioning playbook now removes any older `smoke-test` desktops before creating the new one, so repeated debug runs do not fail with `no_free_display`.
 
 ---
 
@@ -320,6 +359,12 @@ This repo uses **systemd template units** per desktop:
 - `chrome@.service`
 - `aab@.service` (ai-agent-browser)
 
+Each desktop also gets a managed tmux workspace owned by the manager:
+
+- workspace dir: `AADM_WORKSPACE_ROOT_DIR/<desktop-id>`
+- tmux session: `aadm-<desktop-id>`
+- websocket path: `/desktop/<display>/terminal/ws`
+
 Ports are derived from display and `.env` minima:
 
 - `wsPort  = AADM_WEBSOCKIFY_PORT_MIN + (display - AADM_DISPLAY_MIN)`
@@ -380,6 +425,7 @@ curl -s http://127.0.0.1:8899/v1/desktops/desk-3/doctor | jq
 Doctor reports:
 
 - systemd status for VNC/websockify/chrome/aab
+- tmux session status for the terminal workspace
 - Nginx snippet path + existence
 - whether the generated desktop route is protected
 - port checks for VNC/websockify/CDP/AAB
@@ -390,6 +436,23 @@ Doctor reports:
 ```bash
 curl -sX DELETE http://127.0.0.1:8899/v1/desktops/desk-3 | jq
 ```
+
+### Terminal Access
+
+Each desktop response now includes:
+
+- `terminal.sessionName`
+- `terminal.workspaceDir`
+- `terminal.websocketPath`
+- `terminal.websocketUrl`
+
+You can also request terminal access details explicitly:
+
+```bash
+curl -sX POST http://127.0.0.1:8899/v1/desktops/desk-3/terminal-access | jq
+```
+
+In `token` route-auth mode this returns the same desktop bootstrap `accessUrl` plus the terminal websocket URL. Opening that `accessUrl` now lands on the manager-owned desktop shell at `/desktop/<display>/`, where noVNC and the tmux-backed terminal are presented together. The shell shows the terminal websocket as a copyable URL field, and the websocket itself is still exposed through nginx at `/desktop/<display>/terminal/ws`.
 
 ---
 
@@ -424,6 +487,7 @@ This repo includes a small CLI `aadm`:
 npm run cli -- create --owner codex --label work --ttl 90 --start-url https://github.com
 npm run cli -- create --owner codex --label private --route-auth-mode token
 npm run cli -- access-url --id desk-3
+npm run cli -- terminal-access --id desk-3
 npm run cli -- list
 npm run cli -- destroy --id desk-3
 ```

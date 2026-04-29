@@ -29,6 +29,7 @@ TLS_STAGING="false"
 ACTION="run"
 WEB_INGRESS_CIDR=""
 PUBLIC_WEB_INGRESS="false"
+SECRETS_MANAGER_ARN=""
 
   usage() {
    cat <<EOF
@@ -45,6 +46,9 @@ Options:
   --tls-staging                Use the certbot staging endpoint
   --destroy-desktop            Destroy the test desktop after verification
   --destroy-on-success         Destroy the instance and AWS resources after a successful run
+  --secrets-manager-arn <arn>  AWS Secrets Manager ARN containing bridge API keys;
+                               implies --install-bridge (JSON keys: ANTHROPIC_API_KEY,
+                               OPENAI_API_KEY, GEMINI_API_KEY)
   -h, --help                   Show this help
 EOF
   }
@@ -219,6 +223,10 @@ parse_args() {
         DESTROY_ON_SUCCESS="true"
         shift
         ;;
+      --secrets-manager-arn)
+        SECRETS_MANAGER_ARN="$2"
+        shift 2
+        ;;
       -h|--help)
         usage
         exit 0
@@ -353,18 +361,22 @@ $host ansible_user=ubuntu ansible_ssh_private_key_file=$KEY_PATH
 EOF
 }
 
+install_ansible_dependencies() {
+  echo "Installing Ansible Galaxy roles and collections from $ANSIBLE_REQUIREMENTS..." >&2
+  mkdir -p "$ANSIBLE_ROLES_DIR"
+  ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
+  ansible-galaxy role install --force -r "$ANSIBLE_REQUIREMENTS" -p "$ANSIBLE_ROLES_DIR"
+  ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
+  ansible-galaxy collection install -r "$ANSIBLE_REQUIREMENTS"
+}
+
 run_ansible() {
   local host="$1"
   local resolved_tls_domain="$2"
   local public_base_url="https://$resolved_tls_domain"
 
   write_inventory "$host"
-
-  mkdir -p "$ANSIBLE_ROLES_DIR"
-  ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
-  ansible-galaxy role install -r "$ANSIBLE_REQUIREMENTS" -p "$ANSIBLE_ROLES_DIR"
-  ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
-  ansible-galaxy collection install -r "$ANSIBLE_REQUIREMENTS"
+  install_ansible_dependencies
 
   ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
   ansible-playbook \
@@ -378,7 +390,8 @@ run_ansible() {
     -e "aadm_tls_email=$TLS_EMAIL" \
     -e "aadm_tls_staging=$TLS_STAGING" \
     -e "aadm_npm_package=$AAB_NPM_PACKAGE" \
-    -e "aadm_smoke_destroy_desktop=$DESTROY_DESKTOP"
+    -e "aadm_smoke_destroy_desktop=$DESTROY_DESKTOP" \
+    -e "aadm_secrets_manager_arn=$SECRETS_MANAGER_ARN"
 }
 
 fetch_summary() {

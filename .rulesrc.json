@@ -8,11 +8,19 @@
     "publishing",
     "linting",
     "logging",
-    "testing"
+    "testing",
+    "git-hooks"
   ],
-  "ballastVersion": "5.4.2",
-  "languages": ["typescript"],
+  "skills": ["github-health-check"],
+  "ballastVersion": "5.7.3",
+  "languages": ["typescript", "ansible", "terraform"],
   "paths": {
-    "typescript": ["."]
+    "ansible": ["infra/ansible", "infra/ansible/roles/novnc/novnc"],
+    "terraform": [
+      "infra/ansible/roles/novnc/novnc",
+      "infra/ansible/roles/novnc/novnc/smoke/ec2",
+      "infra/smoke-test"
+    ],
+    "typescript": [".", "web"]
   }
 }

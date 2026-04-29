@@ -5,6 +5,11 @@ import {
   normalizeDesktopRouteAuth,
   type DesktopRouteAuth
 } from './route-auth.js';
+import {
+  managerTerminalWebsocketPath,
+  desktopWorkspaceDir,
+  terminalSessionName
+} from './terminal.js';
 
 export type DesktopRecord = {
   id: string;
@@ -21,6 +26,10 @@ export type DesktopRecord = {
   aabPort: number;
   novncUrl: string;
   aabUrl: string;
+  workspaceDir: string;
+  terminalSessionName: string;
+  terminalWebsocketPath: string;
+  terminalWebsocketUrl: string;
   startUrl?: string;
   routeAuth: DesktopRouteAuth;
 };
@@ -36,6 +45,10 @@ type SaveStateHook = (
 ) => Promise<void>;
 
 let saveStateHook: SaveStateHook | undefined;
+
+function normalizedTerminalWebsocketPath(desktopId: string): string {
+  return managerTerminalWebsocketPath(desktopId);
+}
 
 async function ensure() {
   await fs.mkdir(stateDir, { recursive: true });
@@ -56,6 +69,21 @@ export async function loadState(): Promise<State> {
         (desktop): DesktopRecord =>
           ({
             ...(desktop as DesktopRecord),
+            workspaceDir:
+              typeof desktop.workspaceDir === 'string' && desktop.workspaceDir
+                ? desktop.workspaceDir
+                : desktopWorkspaceDir(String(desktop.id ?? '')),
+            terminalSessionName:
+              typeof desktop.terminalSessionName === 'string' &&
+              desktop.terminalSessionName
+                ? desktop.terminalSessionName
+                : terminalSessionName(String(desktop.id ?? '')),
+            terminalWebsocketPath: normalizedTerminalWebsocketPath(
+              String(desktop.id ?? '')
+            ),
+            terminalWebsocketUrl: normalizedTerminalWebsocketPath(
+              String(desktop.id ?? '')
+            ),
             routeAuth: normalizeDesktopRouteAuth(desktop.routeAuth) ?? {
               mode: 'none'
             }

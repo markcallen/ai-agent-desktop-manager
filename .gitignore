@@ -2,12 +2,16 @@ node_modules
 dist
 artifacts
 data
+certs
 .env
+.env.smoke.local
 .DS_Store
 infra/smoke-test/.terraform/
 infra/smoke-test/.runtime/
 infra/smoke-test/*.tfstate
 infra/smoke-test/*.tfstate.*
 infra/ansible/roles/
+infra/ansible/.ansible/
 tasks/
 .ballast/
+.pnpm-store/

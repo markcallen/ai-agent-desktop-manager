@@ -32,11 +32,21 @@ export const Config = z.object({
 
   publicBaseUrl: z.string().url().default('https://host.example.com'),
   allowedStartUrlDomains: z.array(z.string()).default([]),
+  bridgeAddr: z.string().optional(),
+  bridgeAuthToken: z.string().optional(),
+  bridgeCaCertPath: z.string().optional(),
+  bridgeClientCertPath: z.string().optional(),
+  bridgeClientKeyPath: z.string().optional(),
+  bridgeConfigPath: z.string().optional(),
 
   nginxSnippetDir: z.string().default('/etc/nginx/conf.d/agent-desktops'),
   nginxBin: z.string().default('/usr/sbin/nginx'),
   systemctlBin: z.string().default('/bin/systemctl'),
+  tmuxBin: z.string().default('/usr/bin/tmux'),
+  tmuxConfPath: z.string().default('/var/lib/aadm/.tmux.conf'),
+  scriptBin: z.string().default('/usr/bin/script'),
   stateDir: z.string().default(path.resolve('data')),
+  workspaceRootDir: z.string().default(path.resolve('data/workspaces')),
 
   novncPathPrefix: z.string().default('/desktop'),
 
@@ -55,7 +65,9 @@ export const Config = z.object({
   unitVnc: z.string().default('vnc@'),
   unitWebsockify: z.string().default('websockify@'),
   unitChrome: z.string().default('chrome@'),
-  unitAab: z.string().default('aab@')
+  unitAab: z.string().default('aab@'),
+
+  viteDevUrl: z.string().url().optional()
 });
 
 export const config = Config.parse({
@@ -81,12 +93,23 @@ export const config = Config.parse({
   allowedStartUrlDomains: parseStartUrlDomainAllowlist(
     process.env.AADM_ALLOWED_START_URL_DOMAINS
   ),
+  bridgeAddr: process.env.AADM_BRIDGE_ADDR || undefined,
+  bridgeAuthToken: process.env.AADM_BRIDGE_AUTH_TOKEN || undefined,
+  bridgeCaCertPath: process.env.AADM_BRIDGE_CA_CERT_PATH || undefined,
+  bridgeClientCertPath: process.env.AADM_BRIDGE_CLIENT_CERT_PATH || undefined,
+  bridgeClientKeyPath: process.env.AADM_BRIDGE_CLIENT_KEY_PATH || undefined,
+  bridgeConfigPath: process.env.AADM_BRIDGE_CONFIG_PATH || undefined,
 
   nginxSnippetDir:
     process.env.AADM_NGINX_SNIPPET_DIR ?? '/etc/nginx/conf.d/agent-desktops',
   nginxBin: process.env.AADM_NGINX_BIN ?? '/usr/sbin/nginx',
   systemctlBin: process.env.AADM_SYSTEMCTL_BIN ?? '/bin/systemctl',
+  tmuxBin: process.env.AADM_TMUX_BIN ?? '/usr/bin/tmux',
+  tmuxConfPath: process.env.AADM_TMUX_CONF_PATH ?? '/var/lib/aadm/.tmux.conf',
+  scriptBin: process.env.AADM_SCRIPT_BIN ?? '/usr/bin/script',
   stateDir: process.env.AADM_STATE_DIR ?? path.resolve('data'),
+  workspaceRootDir:
+    process.env.AADM_WORKSPACE_ROOT_DIR ?? path.resolve('data/workspaces'),
 
   novncPathPrefix: process.env.AADM_NOVNC_PATH_PREFIX ?? '/desktop',
 
@@ -105,7 +128,9 @@ export const config = Config.parse({
   unitVnc: process.env.AADM_UNIT_VNC ?? 'vnc@',
   unitWebsockify: process.env.AADM_UNIT_WEBSOCKIFY ?? 'websockify@',
   unitChrome: process.env.AADM_UNIT_CHROME ?? 'chrome@',
-  unitAab: process.env.AADM_UNIT_AAB ?? 'aab@'
+  unitAab: process.env.AADM_UNIT_AAB ?? 'aab@',
+
+  viteDevUrl: process.env.AADM_VITE_DEV_URL || undefined
 });
 
 function validateConfig() {

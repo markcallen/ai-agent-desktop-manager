@@ -10,7 +10,7 @@ roles:
     src: https://github.com/geerlingguy/ansible-role-nodejs.git
     scm: git
     version: 7.1.0
-  - name: novnc
-    src: https://github.com/markcallen/novnc-openbox.git
+  - name: markcallen.novnc_desktop
+    src: https://github.com/markcallen/novnc-desktop
     scm: git
-    version: v0.1.0
+    version: v0.1.3

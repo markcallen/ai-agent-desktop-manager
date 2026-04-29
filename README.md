@@ -30,7 +30,7 @@ noVNC is the _human_ view. Agents need DevTools-grade access. The combo looks li
 
 On the Linux host:
 
-- A working noVNC/Openbox stack (your `novnc-openbox` project is perfect)
+- A working `novnc-desktop` stack for the base desktop substrate
 - Nginx serving noVNC via websockify
 - Node.js 22+ (see `.nvmrc` for recommended version)
 - systemd (recommended)
@@ -166,7 +166,7 @@ When route protection is enabled, each desktop snippet also includes an internal
 
 ### Optional HTTPS with certbot
 
-The EC2 smoke helper now uses `novnc-openbox` release `v0.1.0` to provision the base Openbox/noVNC/nginx/auth/TLS stack. This repo only layers the manager and its dynamic desktop routes on top.
+The EC2 smoke helper now installs `markcallen.novnc_desktop` from GitHub at `v0.1.3` to provision the base desktop/noVNC/nginx/auth/TLS stack. This repo only layers the manager and its dynamic desktop routes on top.
 
 The smoke/deployment helper can request a certificate with certbot and nginx HTTP-01 when you have:
 

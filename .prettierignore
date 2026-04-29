@@ -4,3 +4,4 @@ dist
 pnpm-lock.yaml
 web/
 .codex/rules/
+infra/ansible/.ansible/

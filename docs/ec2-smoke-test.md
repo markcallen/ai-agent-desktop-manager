@@ -1,7 +1,7 @@
 # EC2 Smoke Test
 
 This repo now includes a local Terraform + Ansible workflow for a disposable AWS smoke test in an AWS region you choose at runtime.
-The smoke host now uses `novnc-openbox` release `v0.1.0` for the base noVNC/Openbox/nginx/TLS stack instead of rebuilding that layer inside this repo.
+The smoke host now installs `markcallen.novnc_desktop` from GitHub at `v0.1.3` for the base noVNC/desktop/nginx/TLS stack instead of rebuilding that layer inside this repo.
 
 ## What it does
 
@@ -31,7 +31,12 @@ The smoke host now uses `novnc-openbox` release `v0.1.0` for the base noVNC/Open
 - `aws` CLI configured for the target account
 - `terraform`
 - `ansible-playbook`
+- `ansible-galaxy`
 - `ssh`, `ssh-keygen`, `tar`, `curl`, `jq`
+
+The smoke helper installs the pinned Ansible roles and collections from
+[`infra/ansible/requirements.yml`](../infra/ansible/requirements.yml) before it
+runs the playbook.
 
 ## Run
 
@@ -187,6 +192,6 @@ Destroy the stack later with:
 - The current Ansible flow still packages the sibling `../ai-agent-browser` checkout onto the host. `--aab-npm-package` controls the package name used inside that deployment flow.
 - The wrapper leaves the instance running by default for manual inspection.
 - `80/tcp` and `443/tcp` now default to your current public IP. Use `--public-web-ingress` only when broader exposure is intentional.
-- The host always delegates nginx, VNC password handling, and certbot issuance to `novnc-openbox` `v0.1.0`.
+- The host always delegates nginx, VNC password handling, and certbot issuance to `markcallen.novnc_desktop` `v0.1.3`.
 - The delegated Route 53 zone named by `--tls-domain` must already exist and be publicly delegated. Per-run hostname creation now happens inside the Terraform smoke stack, so the separate A-record helper step is no longer needed for each run.
 - The manager smoke desktop now starts at display `:2` so the role-managed desktop on `:1` can coexist without port or display collisions.

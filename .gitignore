@@ -11,6 +11,7 @@ infra/smoke-test/.runtime/
 infra/smoke-test/*.tfstate
 infra/smoke-test/*.tfstate.*
 infra/ansible/roles/
+infra/ansible/.ansible/
 tasks/
 .ballast/
 .pnpm-store/

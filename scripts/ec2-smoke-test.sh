@@ -361,18 +361,22 @@ $host ansible_user=ubuntu ansible_ssh_private_key_file=$KEY_PATH
 EOF
 }
 
+install_ansible_dependencies() {
+  echo "Installing Ansible Galaxy roles and collections from $ANSIBLE_REQUIREMENTS..." >&2
+  mkdir -p "$ANSIBLE_ROLES_DIR"
+  ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
+  ansible-galaxy role install --force -r "$ANSIBLE_REQUIREMENTS" -p "$ANSIBLE_ROLES_DIR"
+  ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
+  ansible-galaxy collection install -r "$ANSIBLE_REQUIREMENTS"
+}
+
 run_ansible() {
   local host="$1"
   local resolved_tls_domain="$2"
   local public_base_url="https://$resolved_tls_domain"
 
   write_inventory "$host"
-
-  mkdir -p "$ANSIBLE_ROLES_DIR"
-  ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
-  ansible-galaxy role install --force -r "$ANSIBLE_REQUIREMENTS" -p "$ANSIBLE_ROLES_DIR"
-  ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
-  ansible-galaxy collection install -r "$ANSIBLE_REQUIREMENTS"
+  install_ansible_dependencies
 
   ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg" \
   ansible-playbook \

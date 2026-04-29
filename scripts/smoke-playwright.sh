@@ -191,7 +191,7 @@ function run_playwright_test() {
 
   # Stop any orphaned desktop systemd units left over from a previous smoke run.
   # These survive aadm restarts because systemd manages them independently.
-  # Display 2 (desk-2) is the managed desktop and must not be stopped.
+  # Display 1 (desk-1) is the permanent base desktop and must not be stopped.
   echo "smoke-playwright: stopping orphaned desktop units from previous runs..." >&2
   ssh \
     -i "$KEY_PATH" \
@@ -202,7 +202,7 @@ function run_playwright_test() {
     'for prefix in vnc websockify chrome aab; do
        units=$(systemctl list-units --no-legend --state=active "${prefix}@*" 2>/dev/null \
                | awk "{print \$1}" \
-               | grep -v "^${prefix}@2\.service$" || true)
+               | grep -v "^${prefix}@1\.service$" || true)
        [ -n "$units" ] && sudo systemctl stop $units 2>/dev/null || true
      done' 2>/dev/null || true
 
